@@ -38,7 +38,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import jenkins.model.Jenkins;
 import jenkins.plugins.git.GitSCMBuilder;
 import jenkins.scm.api.trait.SCMBuilder;
@@ -110,8 +109,7 @@ public abstract class GitSCMExtensionTraitDescriptor extends SCMSourceTraitDescr
     protected GitSCMExtensionTraitDescriptor() {
         super();
         Type bt = Types.getBaseClass(clazz, GitSCMExtensionTrait.class);
-        if (bt instanceof ParameterizedType) {
-            ParameterizedType pt = (ParameterizedType) bt;
+        if (bt instanceof ParameterizedType pt) {
             // this 'extension' is the closest approximation of E of GitSCMExtensionTrait<E>.
             extension = Types.erasure(pt.getActualTypeArguments()[0]);
             if (!GitSCMExtension.class.isAssignableFrom(extension) || GitSCMExtension.class == extension) {
@@ -189,7 +187,6 @@ public abstract class GitSCMExtensionTraitDescriptor extends SCMSourceTraitDescr
      *
      * @return the type of {@link GitSCMExtension} that the {@link GitSCMExtensionTrait} wraps.
      */
-    @SuppressFBWarnings(value="EI_EXPOSE_REP", justification="Low risk")
     public Class<? extends GitSCMExtension> getExtensionClass() {
         return extension;
     }

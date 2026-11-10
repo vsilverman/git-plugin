@@ -1,5 +1,6 @@
 package hudson.plugins.git;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
@@ -11,18 +12,16 @@ import hudson.util.MultipartFormDataParser;
 import jenkins.model.*;
 import org.jenkinsci.plugins.gitclient.Git;
 import org.jenkinsci.plugins.gitclient.GitClient;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
-import javax.servlet.ServletException;
+import jakarta.servlet.ServletException;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
-
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 /**
  * @author Nicolas de Loof
@@ -151,7 +150,7 @@ public class GitTagAction extends AbstractScmTagAction implements Describable<Gi
      * @throws ServletException on servlet error
      */
     @RequirePOST
-    public synchronized void doSubmit(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
+    public synchronized void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
         getACL().checkPermission(getPermission());
 
         try (MultipartFormDataParser parser = new MultipartFormDataParser(req)) {
@@ -187,23 +186,26 @@ public class GitTagAction extends AbstractScmTagAction implements Describable<Gi
     /**
      * The thread that performs tagging operation asynchronously.
      */
-    public final class TagWorkerThread extends TaskThread {
+    public class TagWorkerThread extends TaskThread {
         private final Map<String, String> tagSet;
 
-        @SuppressFBWarnings(value="EI_EXPOSE_REP2", justification="Low risk")
         public TagWorkerThread(Map<String, String> tagSet,String ignoredComment) {
             super(GitTagAction.this, ListenerAndText.forMemory(null));
             this.tagSet = tagSet;
+        }
+
+        protected GitClient getGitClient(TaskListener listener, EnvVars environment, FilePath workspace)
+                throws IOException, InterruptedException {
+            return Git.with(listener, environment)
+                    .in(workspace)
+                    .getClient();
         }
 
         @Override
         protected void perform(final TaskListener listener) throws Exception {
             final EnvVars environment = getRun().getEnvironment(listener);
             final FilePath workspace = new FilePath(new File(ws));
-            final GitClient git = Git.with(listener, environment)
-                    .in(workspace)
-                    .getClient();
-
+            final GitClient git = getGitClient(listener, environment, workspace);
 
             for (Map.Entry<String, String> entry : tagSet.entrySet()) {
                 try {
@@ -231,6 +233,8 @@ public class GitTagAction extends AbstractScmTagAction implements Describable<Gi
 
 
     @Override
+    @SuppressFBWarnings(value="IAOM_DO_NOT_INCREASE_METHOD_ACCESSIBILITY",
+                        justification="Part of the public API")
     public Permission getPermission() {
         return GitSCM.TAG;
     }

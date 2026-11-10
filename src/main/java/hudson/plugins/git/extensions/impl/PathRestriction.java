@@ -9,7 +9,6 @@ import hudson.plugins.git.GitSCM;
 import hudson.plugins.git.extensions.GitSCMExtension;
 import hudson.plugins.git.extensions.GitSCMExtensionDescriptor;
 import hudson.plugins.git.util.BuildData;
-import org.apache.commons.lang.StringUtils;
 import org.jenkinsci.plugins.gitclient.GitClient;
 import org.kohsuke.stapler.DataBoundConstructor;
 
@@ -60,8 +59,12 @@ public class PathRestriction extends GitSCMExtension {
         return normalize(includedRegions);
     }
 
+    @SuppressFBWarnings(value = "PZLA_PREFER_ZERO_LENGTH_ARRAYS", justification = "Public getters return null when no regions are configured; GitSCMBackwardCompatibility exposes the same contract")
     private String[] normalize(String s) {
-        return StringUtils.isBlank(s) ? null : s.split("[\\r\\n]+");
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        return s.split("[\\r\\n]+");
     }
 
     private List<Pattern> getIncludedPatterns() {
@@ -91,7 +94,6 @@ public class PathRestriction extends GitSCMExtension {
     }
 
     @Override
-    @SuppressFBWarnings(value="NP_BOOLEAN_RETURN_NULL", justification="null used to indicate other extensions should decide")
     @CheckForNull
     public Boolean isRevExcluded(GitSCM scm, GitClient git, GitChangeSet commit, TaskListener listener, BuildData buildData) {
         Collection<String> paths = commit.getAffectedPaths();
@@ -146,6 +148,7 @@ public class PathRestriction extends GitSCMExtension {
     }
 
     @Extension
+    // No @Symbol annotation because path exclusion is done using a trait in Pipeline
     public static class DescriptorImpl extends GitSCMExtensionDescriptor {
         @Override
         public String getDisplayName() {

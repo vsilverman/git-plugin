@@ -16,6 +16,7 @@ import hudson.plugins.git.Revision;
 import org.jenkinsci.plugins.gitclient.GitClient;
 
 import java.io.IOException;
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -241,7 +242,7 @@ public abstract class BuildChooser implements ExtensionPoint, Describable<BuildC
      */
     public static DescriptorExtensionList<BuildChooser,BuildChooserDescriptor> all() {
         return Jenkins.get()
-               .<BuildChooser,BuildChooserDescriptor>getDescriptorList(BuildChooser.class);
+               .getDescriptorList(BuildChooser.class);
     }
 
     /**
@@ -259,6 +260,7 @@ public abstract class BuildChooser implements ExtensionPoint, Describable<BuildC
         return result;
     }
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     /**

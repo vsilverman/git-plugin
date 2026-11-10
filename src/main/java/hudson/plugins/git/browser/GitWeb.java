@@ -8,11 +8,13 @@ import hudson.scm.EditType;
 import hudson.scm.RepositoryBrowser;
 import hudson.scm.browsers.QueryBuilder;
 import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
 import java.io.IOException;
+import java.io.Serial;
 import java.net.URL;
 
 /**
@@ -20,6 +22,7 @@ import java.net.URL;
  */
 public class GitWeb extends GitRepositoryBrowser {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     @DataBoundConstructor
@@ -36,7 +39,7 @@ public class GitWeb extends GitRepositoryBrowser {
     public URL getChangeSetLink(GitChangeSet changeSet) throws IOException {
         URL url = getUrl();
 
-        return new URL(url, url.getPath()+param(url).add("a=commit").add("h=" + changeSet.getId()).toString());
+        return new URL(url, url.getPath()+ param(url).add("a=commit").add("h=" + changeSet.getId()));
     }
 
     private QueryBuilder param(URL url) {
@@ -82,6 +85,7 @@ public class GitWeb extends GitRepositoryBrowser {
     }
 
     @Extension
+    @Symbol("gitWeb")
     public static class GitWebDescriptor extends Descriptor<RepositoryBrowser<?>> {
         @NonNull
         public String getDisplayName() {
@@ -89,8 +93,7 @@ public class GitWeb extends GitRepositoryBrowser {
         }
 
         @Override
-        public GitWeb newInstance(StaplerRequest req, @NonNull JSONObject jsonObject) throws FormException {
-            assert req != null; //see inherited javadoc
+        public GitWeb newInstance(@NonNull StaplerRequest2 req, @NonNull JSONObject jsonObject) throws FormException {
             return req.bindJSON(GitWeb.class, jsonObject);
         }
     }

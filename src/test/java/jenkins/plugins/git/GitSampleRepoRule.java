@@ -24,10 +24,13 @@
 
 package jenkins.plugins.git;
 
-import com.gargoylesoftware.htmlunit.WebResponse;
-import com.gargoylesoftware.htmlunit.util.NameValuePair;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import org.htmlunit.WebResponse;
+import org.htmlunit.util.NameValuePair;
 import hudson.Launcher;
 import hudson.model.TaskListener;
+import hudson.plugins.git.GitSCM;
+import hudson.plugins.git.ApiTokenPropertyConfiguration;
 import hudson.util.StreamTaskListener;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -48,6 +51,20 @@ public final class GitSampleRepoRule extends AbstractSampleDVCSRepoRule {
 
     private static final Logger LOGGER = Logger.getLogger(GitSampleRepoRule.class.getName());
 
+    public static final String INVALID_NOTIFY_COMMIT_TOKEN = "invalid-notifyCommit-token";
+
+    @Override
+    public void before() throws Throwable {
+        super.before();
+        GitSCM.ALLOW_LOCAL_CHECKOUT = true;
+    }
+
+    @Override
+    public void after() {
+        super.after();
+        GitSCM.ALLOW_LOCAL_CHECKOUT = false;
+    }
+
     public void git(String... cmds) throws Exception {
         run("git", cmds);
     }
@@ -63,11 +80,20 @@ public final class GitSampleRepoRule extends AbstractSampleDVCSRepoRule {
     public void init() throws Exception {
         run(true, tmp.getRoot(), "git", "version");
         checkGlobalConfig();
-        git("init");
+        git("init", "--template="); // initialize without copying the installation defaults to ensure a vanilla repo that behaves the same everywhere
+        if (gitVersionAtLeast(2, 30)) {
+            // Force branch name to master even if system default is not master
+            // Fails on git 2.25 and earlier (Ubuntu 20.04, etc.)
+            // Works on git 2.30 and later
+            git("branch", "-m", "master");
+        }
         write("file", "");
         git("add", "file");
         git("config", "user.name", "Git SampleRepoRule");
         git("config", "user.email", "gits@mplereporule");
+        git("config", "init.defaultbranch", "master");
+        git("config", "commit.gpgsign", "false");
+        git("config", "tag.gpgSign", "false");
         git("commit", "--message=init");
     }
 
@@ -76,15 +102,67 @@ public final class GitSampleRepoRule extends AbstractSampleDVCSRepoRule {
     }
 
     public void notifyCommit(JenkinsRule r) throws Exception {
+        String notifyCommitToken = ApiTokenPropertyConfiguration.get().generateApiToken("notifyCommit").getString("value");
+        notifyCommitWithResults(r, notifyCommitToken, null);
+    }
+
+    public String notifyCommitWithResults(JenkinsRule r) throws Exception {
+        String notifyCommitToken = ApiTokenPropertyConfiguration.get().generateApiToken("notifyCommit").getString("value");
+        return notifyCommitWithResults(r, notifyCommitToken, null);
+    }
+
+    public String notifyCommitWithResults(JenkinsRule r, @CheckForNull String notifyCommitToken) throws Exception {
+        return notifyCommitWithResults(r, notifyCommitToken, null);
+    }
+
+    /**
+     * Use WebClient to call notifyCommit on the current repository.
+     *
+     * If the caller expects an error and does not want an
+     * exception thrown by the web response, the notifyCommitToken
+     * must contain the invalid notifyCommit token string.
+     *
+     * If the caller wants to pass no access token, the
+     * notifyCommitToken needs to be null
+     *
+     * If the caller wants to pass no SHA-1, the sha1 parameter needs to be null.
+     *
+     * @param r JenkinsRule to receive the commit notification
+     * @param notifyCommitToken token used for notifyCommit authentication
+     * @param sha1 SHA-1 hash to included in notifyCommit
+     **/
+    public String notifyCommitWithResults(JenkinsRule r, @CheckForNull String notifyCommitToken, @CheckForNull String sha1) throws Exception {
+        boolean expectError = notifyCommitToken == null || notifyCommitToken.contains(INVALID_NOTIFY_COMMIT_TOKEN);
         synchronousPolling(r);
-        WebResponse webResponse = r.createWebClient().goTo("git/notifyCommit?url=" + bareUrl(), "text/plain").getWebResponse();
-        LOGGER.log(Level.FINE, webResponse.getContentAsString());
+        JenkinsRule.WebClient webClient = r.createWebClient();
+        if (expectError) {
+            /* Return without exception on failing status code */
+            webClient.getOptions().setThrowExceptionOnFailingStatusCode(false);
+            /* Do not clutter output with failures that are expected and checked by the caller */
+            webClient.getOptions().setPrintContentOnFailingStatusCode(false);
+        }
+        String responseFormat = expectError ? "text/html" : "text/plain";
+        String tokenArgument = notifyCommitToken != null ? "&token=" + notifyCommitToken : "";
+        String sha1Argument = sha1 != null ? "&sha1=" + sha1 : "";
+
+        WebResponse webResponse = webClient.goTo("git/notifyCommit?url=" + bareUrl() + tokenArgument + sha1Argument, responseFormat).getWebResponse();
+        StringBuilder sb = new StringBuilder(webResponse.getContentAsString());
+        if (!expectError) {
+            LOGGER.log(Level.FINE, sb.toString());
+        }
+
         for (NameValuePair pair : webResponse.getResponseHeaders()) {
             if (pair.getName().equals("Triggered")) {
-                LOGGER.log(Level.FINE, "Triggered: " + pair.getValue());
+                sb.append('\n');
+                sb.append("Triggered: ");
+                sb.append(pair.getValue());
+                if (!expectError) {
+                    LOGGER.log(Level.FINE, "Triggered: " + pair.getValue());
+                }
             }
         }
         r.waitUntilNoActivity();
+        return sb.toString();
     }
 
     public String head() throws Exception {
@@ -115,18 +193,33 @@ public final class GitSampleRepoRule extends AbstractSampleDVCSRepoRule {
         final int gitMajor = Integer.parseInt(fields[0]);
         final int gitMinor = Integer.parseInt(fields[1]);
         final int gitPatch = Integer.parseInt(fields[2]);
-        if (gitMajor < 1 || gitMajor > 3) {
+        if (gitMajor < 1) {
             LOGGER.log(Level.WARNING, "Unexpected git major version " + gitMajor + " parsed from '" + versionOutput + "', field:'" + fields[0] + "'");
         }
-        if (gitMinor < 0 || gitMinor > 50) {
+        if (gitMinor < 0) {
             LOGGER.log(Level.WARNING, "Unexpected git minor version " + gitMinor + " parsed from '" + versionOutput + "', field:'" + fields[1] + "'");
         }
-        if (gitPatch < 0 || gitPatch > 20) {
+        if (gitPatch < 0) {
             LOGGER.log(Level.WARNING, "Unexpected git patch version " + gitPatch + " parsed from '" + versionOutput + "', field:'" + fields[2] + "'");
         }
 
         return gitMajor >  neededMajor ||
               (gitMajor == neededMajor && gitMinor >  neededMinor) ||
               (gitMajor == neededMajor && gitMinor == neededMinor  && gitPatch >= neededPatch);
+    }
+
+    public boolean hasGitLFS() {
+        final TaskListener procListener = StreamTaskListener.fromStderr();
+        final ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            int returnCode = new Launcher.LocalLauncher(procListener).launch().cmds("git", "lfs", "version").stdout(out).join();
+            if (returnCode != 0) {
+                return false;
+            }
+        } catch (IOException | InterruptedException ex) {
+            return false;
+        }
+        final String versionOutput = out.toString().trim();
+        return versionOutput.startsWith("git-lfs/");
     }
 }

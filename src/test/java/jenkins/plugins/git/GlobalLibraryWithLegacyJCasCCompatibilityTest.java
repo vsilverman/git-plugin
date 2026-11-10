@@ -21,6 +21,7 @@ import hudson.plugins.git.extensions.impl.PathRestriction;
 import hudson.plugins.git.extensions.impl.PerBuildTag;
 import hudson.plugins.git.extensions.impl.PreBuildMerge;
 import hudson.plugins.git.extensions.impl.PruneStaleBranch;
+import hudson.plugins.git.extensions.impl.PruneStaleTag;
 import hudson.plugins.git.extensions.impl.RelativeTargetDirectory;
 import hudson.plugins.git.extensions.impl.ScmName;
 import hudson.plugins.git.extensions.impl.SparseCheckoutPath;
@@ -30,13 +31,14 @@ import hudson.plugins.git.extensions.impl.UserExclusion;
 import hudson.plugins.git.extensions.impl.UserIdentity;
 import hudson.plugins.git.extensions.impl.WipeWorkspace;
 import hudson.scm.SCM;
-import io.jenkins.plugins.casc.misc.RoundTripAbstractTest;
+import io.jenkins.plugins.casc.misc.junit.jupiter.AbstractRoundTripTest;
 import org.jenkinsci.plugins.gitclient.MergeCommand;
 import org.jenkinsci.plugins.workflow.libs.GlobalLibraries;
 import org.jenkinsci.plugins.workflow.libs.LibraryConfiguration;
 import org.jenkinsci.plugins.workflow.libs.LibraryRetriever;
 import org.jenkinsci.plugins.workflow.libs.SCMRetriever;
-import org.jvnet.hudson.test.RestartableJenkinsRule;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import java.util.List;
 
@@ -46,14 +48,14 @@ import static org.hamcrest.collection.IsCollectionWithSize.hasSize;
 import static org.hamcrest.core.AllOf.allOf;
 import static org.hamcrest.core.IsEqual.equalTo;
 import static org.hamcrest.core.IsInstanceOf.instanceOf;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
-public class GlobalLibraryWithLegacyJCasCCompatibilityTest extends RoundTripAbstractTest {
+@WithJenkins
+class GlobalLibraryWithLegacyJCasCCompatibilityTest extends AbstractRoundTripTest {
+
     @Override
-    protected void assertConfiguredAsExpected(RestartableJenkinsRule restartableJenkinsRule, String s) {
+    protected void assertConfiguredAsExpected(JenkinsRule rule, String s) {
         final LibraryConfiguration library = GlobalLibraries.get().getLibraries().get(0);
         assertEquals("My Git Lib", library.getName());
         assertEquals("1.2.3", library.getDefaultVersion());
@@ -85,7 +87,7 @@ public class GlobalLibraryWithLegacyJCasCCompatibilityTest extends RoundTripAbst
 
         assertFalse(gitSCM.isDoGenerateSubmoduleConfigurations());
 
-        assertThat(gitSCM.getExtensions(), hasSize(22));
+        assertThat(gitSCM.getExtensions(), hasSize(23));
         assertThat(gitSCM.getExtensions(), containsInAnyOrder(
                 // Advanced checkout behaviours
                 allOf(
@@ -156,6 +158,10 @@ public class GlobalLibraryWithLegacyJCasCCompatibilityTest extends RoundTripAbst
                 // Prune stale remote-tracking branches
                 allOf(
                         instanceOf(PruneStaleBranch.class)
+                ),
+                // Prune stale tags
+                allOf(
+                        instanceOf(PruneStaleTag.class)
                 ),
                 // Use commit author in changelog
                 allOf(

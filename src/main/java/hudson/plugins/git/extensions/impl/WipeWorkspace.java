@@ -26,6 +26,10 @@ public class WipeWorkspace extends GitSCMExtension {
      */
     @Override
     public void beforeCheckout(GitSCM scm, Run<?, ?> build, GitClient git, TaskListener listener) throws IOException, InterruptedException, GitException {
+        if (build != null && build.getClass().getName().startsWith("org.jenkinsci.plugins.workflow.job.")) {
+            listener.getLogger().println("DEPRECATED: The 'Wipe out repository & force clone' extension is deprecated for Pipeline jobs. " + "Pipeline users should use the deleteDir() step instead.");
+        }
+
         listener.getLogger().println("Wiping out workspace first.");
         git.getWorkTree().deleteContents();
     }
@@ -61,6 +65,7 @@ public class WipeWorkspace extends GitSCMExtension {
     }
 
     @Extension
+    /* No @Symbol because Pipeline users should use deleteDir() */
     public static class DescriptorImpl extends GitSCMExtensionDescriptor {
         /**
          * {@inheritDoc}

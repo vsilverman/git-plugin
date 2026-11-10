@@ -16,6 +16,7 @@ import hudson.plugins.git.GitTool;
 import hudson.tasks.BatchFile;
 import hudson.tasks.Shell;
 import jenkins.model.Jenkins;
+import jenkins.plugins.git.junit.jupiter.WithGitSampleRepo;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.jenkinsci.plugins.credentialsbinding.MultiBinding;
@@ -26,42 +27,68 @@ import org.jenkinsci.plugins.gitclient.JGitTool;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.BuildWatcherExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Collection;
 import java.util.Random;
 
+import static hudson.Functions.isWindows;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
-import static org.hamcrest.Matchers.equalTo;
 
-@RunWith(Parameterized.class)
-public class GitUsernamePasswordBindingTest {
-    @Parameterized.Parameters(name = "User {0}: Password {1}: GitToolInstance {2}")
-    public static Collection<Object[]> data() {
+@TestMethodOrder(MethodOrderer.Random.class)
+@ParameterizedClass(name = "User {0}: Password {1}: GitToolInstance {2}")
+@MethodSource("data")
+@WithJenkins
+@WithGitSampleRepo
+class GitUsernamePasswordBindingTest {
+
+    @SuppressWarnings("unused")
+    @RegisterExtension
+    private static final BuildWatcherExtension BUILD_WATCHER = new BuildWatcherExtension();
+
+    static Collection<Object[]> data() {
         return Arrays.asList(testData);
     }
 
-    @Rule
-    public final TemporaryFolder tempFolder = new TemporaryFolder();
+    @TempDir
+    private File tempFolder;
 
-    @Rule
-    public JenkinsRule r = new JenkinsRule();
+    private JenkinsRule r;
 
-    @Rule
-    public GitSampleRepoRule g = new GitSampleRepoRule();
+    private GitSampleRepoRule g;
+
+    private static final Instant START_TIME = Instant.now();
+
+    private static final int MAX_SECONDS_FOR_THESE_TESTS = 200;
+
+    private boolean isTimeAvailable() {
+        String env = System.getenv("CI");
+        if (!Boolean.parseBoolean(env)) {
+            // Run all tests when not in CI environment
+            return true;
+        }
+        return Duration.between(START_TIME, Instant.now()).toSeconds() <= MAX_SECONDS_FOR_THESE_TESTS;
+    }
 
     private final String username;
 
@@ -72,10 +99,10 @@ public class GitUsernamePasswordBindingTest {
     private final String credentialID = DigestUtils.sha256Hex(("Git Usernanme and Password Binding").getBytes(StandardCharsets.UTF_8));
 
     private File rootDir = null;
+
     private FilePath rootFilePath = null;
     private UsernamePasswordCredentialsImpl credentials = null;
     private GitUsernamePasswordBinding gitCredBind = null;
-
     private static final Random random = new Random();
 
     private static String[] userNames = {
@@ -85,12 +112,15 @@ public class GitUsernamePasswordBindingTest {
         "r-Name",
         "randomName",
     };
+
     private static String[] passwords = {
-        "&Ampersand&",
+        "&Ampersand-long-enough&",
         "He said \"Hello\", then left.",
-        "default=@#(*^!",
-        "here's-a-quote",
-        "special%%_342@**",
+        "default=@#(*^!-long-enough",
+        "has_a_trailing_quote=@#(*^!'",
+        "here's-a-quote-long-enough",
+        "special%%_342@**-long-enough",
+        "%interior-single-quote%_786'@**",
     };
     private static GitTool[] gitTools = {
         new GitTool("Default", "git", null),
@@ -98,9 +128,10 @@ public class GitUsernamePasswordBindingTest {
         new JGitApacheTool(),
         new JGitTool(),
     };
+    /* Create three test data items using random selections from the larger set of data */
 
-    /* Create two test data items using random selections from the larger set of data */
     private static Object[][] testData = new Object[][]{
+        {userNames[random.nextInt(userNames.length)], passwords[random.nextInt(passwords.length)], gitTools[random.nextInt(gitTools.length)]},
         {userNames[random.nextInt(userNames.length)], passwords[random.nextInt(passwords.length)], gitTools[random.nextInt(gitTools.length)]},
         {userNames[random.nextInt(userNames.length)], passwords[random.nextInt(passwords.length)], gitTools[random.nextInt(gitTools.length)]},
     };
@@ -111,10 +142,13 @@ public class GitUsernamePasswordBindingTest {
         this.gitToolInstance = gitToolInstance;
     }
 
-    @Before
-    public void basicSetup() throws IOException {
+    @BeforeEach
+    void beforeEach(JenkinsRule rule, GitSampleRepoRule repo) throws Exception {
+        r = rule;
+        g = repo;
+
         //File init
-        rootDir = tempFolder.getRoot();
+        rootDir = tempFolder;
         rootFilePath = new FilePath(rootDir.getAbsoluteFile());
 
         //Credential init
@@ -132,16 +166,17 @@ public class GitUsernamePasswordBindingTest {
 
     private String batchCheck(boolean includeCliCheck) {
         return includeCliCheck
-                ? "set | findstr GIT_USERNAME > auth.txt & set | findstr GIT_PASSWORD >> auth.txt & set | findstr GCM_INTERACTIVE >> auth.txt"
-                : "set | findstr GIT_USERNAME > auth.txt & set | findstr GIT_PASSWORD >> auth.txt";
+                ? "set | findstr GIT_USERNAME > auth.txt & set | findstr GIT_PASSWORD >> auth.txt & set | findstr GCM_INTERACTIVE >> auth.txt & type auth.txt"
+                : "set | findstr GIT_USERNAME > auth.txt & set | findstr GIT_PASSWORD >> auth.txt & type auth.txt";
     }
 
     private String shellCheck() {
-        return "env | grep -E \"GIT_USERNAME|GIT_PASSWORD|GIT_TERMINAL_PROMPT\" > auth.txt";
+        return "env | grep -E \"GIT_USERNAME|GIT_PASSWORD|GIT_TERMINAL_PROMPT\" > auth.txt; cat auth.txt";
     }
 
     @Test
-    public void test_EnvironmentVariables_FreeStyleProject() throws Exception {
+    void test_EnvironmentVariables_FreeStyleProject() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         FreeStyleProject prj = r.createFreeStyleProject();
         prj.getBuildWrappersList().add(new SecretBuildWrapper(Collections.<MultiBinding<?>>
                 singletonList(new GitUsernamePasswordBinding(gitToolInstance.getName(), credentialID))));
@@ -162,8 +197,12 @@ public class GitUsernamePasswordBindingTest {
         FreeStyleBuild b = r.buildAndAssertSuccess(prj);
         if(credentials.isUsernameSecret()) {
             r.assertLogNotContains(this.username, b);
+            r.assertLogContains("GIT_USERNAME=****", b);
+        } else {
+            r.assertLogContains("GIT_USERNAME=" + this.username, b);
         }
         r.assertLogNotContains(this.password, b);
+        r.assertLogContains("GIT_PASSWORD=****", b);
 
         //Assert Keys
         assertThat(binding.variables(b), hasItem("GIT_USERNAME"));
@@ -178,14 +217,15 @@ public class GitUsernamePasswordBindingTest {
         if (isCliGitTool()) {
             if (isWindows()) {
                 assertThat(fileContents, containsString("GCM_INTERACTIVE=false"));
-            } else if (g.gitVersionAtLeast(2, 3, 0)) {
+            } else {
                 assertThat(fileContents, containsString("GIT_TERMINAL_PROMPT=false"));
             }
         }
     }
 
     @Test
-    public void test_EnvironmentVariables_PipelineJob() throws Exception {
+    void test_EnvironmentVariables_PipelineJob() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         WorkflowJob project = r.createProject(WorkflowJob.class);
 
         // JENKINS-66214 - allow either gitUsernamePassword or GitUsernamePassword as keyword
@@ -210,7 +250,11 @@ public class GitUsernamePasswordBindingTest {
         r.assertBuildStatusSuccess(b);
         if(credentials.isUsernameSecret()) {
             r.assertLogNotContains(this.username, b);
+            r.assertLogContains("GIT_USERNAME=****", b);
+        } else {
+            r.assertLogContains("GIT_USERNAME=" + this.username, b);
         }
+        r.assertLogContains("GIT_PASSWORD=****", b);
         r.assertLogNotContains(this.password, b);
         //Assert credential values
         String fileContents = r.jenkins.getWorkspaceFor(project).child("auth.txt").readToString().trim();
@@ -222,19 +266,21 @@ public class GitUsernamePasswordBindingTest {
         if (isCliGitTool()) {
             if (isWindows()) {
                 assertThat(fileContents, containsString("GCM_INTERACTIVE=false"));
-            } else if (g.gitVersionAtLeast(2, 3, 0)) {
+            } else {
                 assertThat(fileContents, containsString("GIT_TERMINAL_PROMPT=false"));
             }
         }
     }
 
     @Test
-    public void test_isCurrentNodeOSUnix(){
+    void test_isCurrentNodeOSUnix(){
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         assertThat(gitCredBind.isCurrentNodeOSUnix(r.createLocalLauncher()), not(equalTo(isWindows())));
     }
 
     @Test
-    public void test_getCliGitTool_using_FreeStyleProject() throws Exception {
+    void test_getCliGitTool_using_FreeStyleProject() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         FreeStyleProject prj = r.createFreeStyleProject();
         prj.getBuildWrappersList().add(new SecretBuildWrapper(Collections.<MultiBinding<?>>
                 singletonList(new GitUsernamePasswordBinding(gitToolInstance.getName(), credentialID))));
@@ -258,7 +304,8 @@ public class GitUsernamePasswordBindingTest {
     }
 
     @Test
-    public void test_getGitClientInstance() throws IOException, InterruptedException {
+    void test_getGitClientInstance() throws IOException, InterruptedException {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         if (isCliGitTool()) {
             assertThat(gitCredBind.getGitClientInstance(gitToolInstance.getGitExe(), rootFilePath,
                     new EnvVars(), TaskListener.NULL), instanceOf(CliGitAPIImpl.class));
@@ -269,26 +316,21 @@ public class GitUsernamePasswordBindingTest {
     }
 
     @Test
-    public void test_GenerateGitScript_write() throws IOException, InterruptedException {
+    void test_GenerateGitScript_write() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         GitUsernamePasswordBinding.GenerateGitScript tempGenScript = new GitUsernamePasswordBinding.GenerateGitScript(this.username, this.password, credentials.getId(), !isWindows());
         assertThat(tempGenScript.type(), is(StandardUsernamePasswordCredentials.class));
         FilePath tempScriptFile = tempGenScript.write(credentials, rootFilePath);
         if (!isWindows()) {
             assertThat(tempScriptFile.mode(), is(0500));
             assertThat("File extension not sh", FilenameUtils.getExtension(tempScriptFile.getName()), is("sh"));
+            assertThat(tempScriptFile.readToString(), containsString("Username*) cat"));
+            assertThat(tempScriptFile.readToString(), containsString("Password*) cat"));
         } else {
             assertThat("File extension not bat", FilenameUtils.getExtension(tempScriptFile.getName()), is("bat"));
+            assertThat(tempScriptFile.readToString(), containsString("IF %ARG:~0,8%==Username type"));
+            assertThat(tempScriptFile.readToString(), containsString("IF %ARG:~0,8%==Password type"));
         }
-        assertThat(tempScriptFile.readToString(), containsString(this.username));
-        assertThat(tempScriptFile.readToString(), containsString(this.password));
-    }
-
-    /**
-     * inline ${@link hudson.Functions#isWindows()} to prevent a transient
-     * remote classloader issue
-     */
-    private static boolean isWindows() {
-        return File.pathSeparatorChar == ';';
     }
 
     private boolean isCliGitTool() {

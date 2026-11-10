@@ -8,10 +8,17 @@ on:
 
 jobs:
   update_release_draft:
+    # Only draft release notes on the repo in the jenkinsci GitHub organization
+    if: ${{ github.repository_owner == 'jenkinsci' }}
     runs-on: ubuntu-latest
     steps:
+      # https://github.com/release-drafter/release-drafter/issues/871#issuecomment-3686135188
+      - name: Wait for 15 seconds to ensure GraphQL consistency
+        shell: bash
+        run: sleep 15s
       # Drafts your next Release notes as Pull Requests are merged into "master"
-      - uses: release-drafter/release-drafter@v5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release Drafter
+        uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7.10.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 

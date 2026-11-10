@@ -8,11 +8,13 @@ import hudson.scm.EditType;
 import hudson.scm.RepositoryBrowser;
 import hudson.scm.browsers.QueryBuilder;
 import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
 import java.io.IOException;
+import java.io.Serial;
 import java.net.URL;
 
 /**
@@ -20,6 +22,7 @@ import java.net.URL;
  */
 public class CGit extends GitRepositoryBrowser {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     @DataBoundConstructor
@@ -42,7 +45,7 @@ public class CGit extends GitRepositoryBrowser {
     @Override
     public URL getChangeSetLink(GitChangeSet changeSet) throws IOException {
         URL url = getUrl();
-        return new URL(url, url.getPath() + "commit/" + param(url).add("id=" + changeSet.getId()).toString());
+        return new URL(url, url.getPath() + "commit/" + param(url).add("id=" + changeSet.getId()));
     }
 
     /**
@@ -57,7 +60,7 @@ public class CGit extends GitRepositoryBrowser {
     public URL getDiffLink(Path path) throws IOException {
         GitChangeSet changeSet = path.getChangeSet();
         URL url = getUrl();
-        return new URL(url, url.getPath() + "diff/" + path.getPath() + param(url).add("id=" + changeSet.getId()).toString());
+        return new URL(url, url.getPath() + "diff/" + path.getPath() + param(url).add("id=" + changeSet.getId()));
     }
 
     /**
@@ -73,13 +76,14 @@ public class CGit extends GitRepositoryBrowser {
         GitChangeSet changeSet = path.getChangeSet();
         URL url = getUrl();
         if (path.getEditType() == EditType.DELETE) {
-            return encodeURL(new URL(url, url.getPath() + "tree/" + path.getPath() + param(url).add("id=" + changeSet.getParentCommit()).toString()));
+            return encodeURL(new URL(url, url.getPath() + "tree/" + path.getPath() + param(url).add("id=" + changeSet.getParentCommit())));
         } else {
-            return encodeURL(new URL(url, url.getPath() + "tree/" + path.getPath() + param(url).add("id=" + changeSet.getId()).toString()));
+            return encodeURL(new URL(url, url.getPath() + "tree/" + path.getPath() + param(url).add("id=" + changeSet.getId())));
         }
     }
 
     @Extension
+    @Symbol("cgit")
     public static class CGITDescriptor extends Descriptor<RepositoryBrowser<?>> {
         @NonNull
         public String getDisplayName() {
@@ -87,8 +91,7 @@ public class CGit extends GitRepositoryBrowser {
         }
 
         @Override
-        public CGit newInstance(StaplerRequest req, @NonNull JSONObject jsonObject) throws FormException {
-            assert req != null; //see inherited javadoc
+        public CGit newInstance(@NonNull StaplerRequest2 req, @NonNull JSONObject jsonObject) throws FormException {
             return req.bindJSON(CGit.class, jsonObject);
         }
     }

@@ -13,22 +13,25 @@ import hudson.scm.browsers.QueryBuilder;
 import hudson.util.FormValidation;
 import hudson.util.FormValidation.URLCheck;
 import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 import org.kohsuke.stapler.QueryParameter;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
-import javax.servlet.ServletException;
+import jakarta.servlet.ServletException;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
+import java.io.Serial;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 public class ViewGitWeb extends GitRepositoryBrowser {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     private final String projectName;
@@ -60,15 +63,14 @@ public class ViewGitWeb extends GitRepositoryBrowser {
         return encodeURL(new URL(url, url.getPath() + spec));
     }
 
-	private String buildCommitDiffSpec(URL url, Path path)
-			throws UnsupportedEncodingException {
-        return param(url).add("p=" + projectName).add("a=commitdiff").add("h=" + path.getChangeSet().getId()) + "#" +  URLEncoder.encode(path.getPath(),"UTF-8");
+	private String buildCommitDiffSpec(URL url, Path path) {
+        return param(url).add("p=" + projectName).add("a=commitdiff").add("h=" + path.getChangeSet().getId()) + "#" +  URLEncoder.encode(path.getPath(), StandardCharsets.UTF_8);
 	}
 
     @Override
     public URL getChangeSetLink(GitChangeSet changeSet) throws IOException {
         URL url = getUrl();
-        return new URL(url, url.getPath() + param(url).add("p=" + projectName).add("a=commit").add("h=" + changeSet.getId()).toString());
+        return new URL(url, url.getPath() + param(url).add("p=" + projectName).add("a=commit").add("h=" + changeSet.getId()));
     }
 
     private QueryBuilder param(URL url) {
@@ -80,6 +82,7 @@ public class ViewGitWeb extends GitRepositoryBrowser {
     }
 
     @Extension
+    @Symbol("viewgit")
     public static class ViewGitWebDescriptor extends Descriptor<RepositoryBrowser<?>> {
         @NonNull
         public String getDisplayName() {
@@ -87,8 +90,7 @@ public class ViewGitWeb extends GitRepositoryBrowser {
         }
 
         @Override
-        public ViewGitWeb newInstance(StaplerRequest req, @NonNull JSONObject jsonObject) throws FormException {
-            assert req != null; //see inherited javadoc
+        public ViewGitWeb newInstance(@NonNull StaplerRequest2 req, @NonNull JSONObject jsonObject) throws FormException {
             return req.bindJSON(ViewGitWeb.class, jsonObject);
         }
 
@@ -104,7 +106,7 @@ public class ViewGitWeb extends GitRepositoryBrowser {
                 return FormValidation.error(Messages.invalidUrl());
             }
             return new URLCheck() {
-                protected FormValidation check() throws IOException, ServletException {
+                protected FormValidation check() throws IOException {
                     String v = cleanUrl;
                     if (!v.endsWith("/"))
                         v += '/';
@@ -116,7 +118,11 @@ public class ViewGitWeb extends GitRepositoryBrowser {
                             return FormValidation.error("This is a valid URL but it doesn't look like ViewGit");
                         }
                     } catch (IOException e) {
-                        return handleIOException(v, e);
+                        if (e.getMessage().equals(v)) {
+                            return FormValidation.error("Unable to connect " + v, e);
+                        } else {
+                            return FormValidation.error(e.getMessage(), e);
+                        }
                     }
                 }
             }.check();

@@ -30,6 +30,7 @@ import hudson.plugins.git.extensions.impl.PruneStaleBranch;
 import jenkins.plugins.git.GitSCMSourceContext;
 import jenkins.scm.api.trait.SCMSourceContext;
 import jenkins.scm.api.trait.SCMSourceTrait;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
@@ -51,8 +52,7 @@ public class PruneStaleBranchTrait extends GitSCMExtensionTrait<PruneStaleBranch
      */
     @Override
     protected void decorateContext(SCMSourceContext<?, ?> context) {
-        if (context instanceof GitSCMSourceContext) {
-            GitSCMSourceContext<?, ?> ctx = (GitSCMSourceContext<?, ?>) context;
+        if (context instanceof GitSCMSourceContext<?,?> ctx) {
             ctx.pruneRefs(true);
         }
     }
@@ -61,6 +61,7 @@ public class PruneStaleBranchTrait extends GitSCMExtensionTrait<PruneStaleBranch
      * Our {@link hudson.model.Descriptor}
      */
     @Extension
+    @Symbol("pruneStaleBranch")
     public static class DescriptorImpl extends GitSCMExtensionTraitDescriptor {
         /**
          * {@inheritDoc}

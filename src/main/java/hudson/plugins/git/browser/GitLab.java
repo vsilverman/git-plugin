@@ -9,15 +9,17 @@ import hudson.scm.RepositoryBrowser;
 import hudson.util.FormValidation;
 import net.sf.json.JSONObject;
 
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 import java.io.IOException;
+import java.io.Serial;
 import java.net.URL;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
-import javax.servlet.ServletException;
+import jakarta.servlet.ServletException;
 
 import org.kohsuke.stapler.QueryParameter;
 
@@ -26,6 +28,7 @@ import org.kohsuke.stapler.QueryParameter;
  */
 public class GitLab extends GitRepositoryBrowser {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     private Double version;
@@ -99,11 +102,10 @@ public class GitLab extends GitRepositoryBrowser {
     public URL getDiffLink(Path path) throws IOException {
         final GitChangeSet changeSet = path.getChangeSet();
         String filelink;
-        if(getVersionDouble() < 8.0) {
-                filelink = "#" + path.getPath();
-        } else
-        {
-        	filelink = "#diff-" + String.valueOf(getIndexOfPath(path));
+        if (getVersionDouble() < 8.0) {
+            filelink = "#" + path.getPath();
+        } else {
+            filelink = "#diff-" + getIndexOfPath(path);
         }
         return new URL(getUrl(), calculatePrefix() + changeSet.getId() + filelink);
     }
@@ -134,6 +136,7 @@ public class GitLab extends GitRepositoryBrowser {
     }
 
     @Extension
+    @Symbol("gitLab")
     public static class GitLabDescriptor extends Descriptor<RepositoryBrowser<?>> {
         @NonNull
         public String getDisplayName() {
@@ -141,8 +144,7 @@ public class GitLab extends GitRepositoryBrowser {
         }
 
         @Override
-        public GitLab newInstance(StaplerRequest req, @NonNull JSONObject jsonObject) throws FormException {
-            assert req != null; //see inherited javadoc
+        public GitLab newInstance(@NonNull StaplerRequest2 req, @NonNull JSONObject jsonObject) throws FormException {
             return req.bindJSON(GitLab.class, jsonObject);
         }
 

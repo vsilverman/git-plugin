@@ -6,6 +6,7 @@ import hudson.FilePath;
 import hudson.model.TaskListener;
 import hudson.model.UserProperty;
 import hudson.model.User;
+import hudson.plugins.git.util.GitUtilsTest;
 import hudson.tasks.Mailer;
 
 import java.io.File;
@@ -18,7 +19,8 @@ import org.jenkinsci.plugins.gitclient.Git;
 import org.jenkinsci.plugins.gitclient.GitClient;
 
 public class TestGitRepo {
-	protected String name; // The name of this repository.
+
+    protected String name; // The name of this repository.
 	protected TaskListener listener;
 	
 	/**
@@ -31,11 +33,11 @@ public class TestGitRepo {
 	public final PersonIdent johnDoe = new PersonIdent("John Doe", "john@doe.com");
 	public final PersonIdent janeDoe = new PersonIdent("Jane Doe", "jane@doe.com");
     
-    public TestGitRepo(String name, File tmpDir, TaskListener listener) throws IOException, InterruptedException {
+    public TestGitRepo(String name, File tmpDir, TaskListener listener) throws Exception {
 		this.name = name;
 		this.listener = listener;
 		
-		EnvVars envVars = new EnvVars();
+		EnvVars envVars = GitUtilsTest.getConfigNoSystemEnvsVars();
 		
 		gitDir = tmpDir;
 		User john = User.getOrCreateByIdOrFullName(johnDoe.getName());
@@ -52,6 +54,8 @@ public class TestGitRepo {
 
         // finally: initialize the repo
 		git.init();
+        git.config(GitClient.ConfigLevel.LOCAL, "commit.gpgsign", "false");
+        git.config(GitClient.ConfigLevel.LOCAL, "tag.gpgSign", "false");
 	}
 	
     /**

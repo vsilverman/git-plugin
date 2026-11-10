@@ -109,7 +109,7 @@ public class UserMergeOptions extends AbstractDescribableImpl<UserMergeOptions> 
 
     @DataBoundSetter
     public void setMergeStrategy(MergeCommand.Strategy mergeStrategy) {
-        this.mergeStrategy = mergeStrategy.toString(); // not .name() as you might expect! TODO in Turkey this will be e.g. recursıve
+        this.mergeStrategy = mergeStrategy.toString(); // not .name() as you might expect! toString() lowercases with Locale.ENGLISH, so it is locale independent
     }
 
     public MergeCommand.GitPluginFastForwardMode getFastForwardMode() {
@@ -168,8 +168,8 @@ public class UserMergeOptions extends AbstractDescribableImpl<UserMergeOptions> 
         public Map<String, Object> customInstantiate(Map<String, Object> arguments) {
             Map<String, Object> r = new HashMap<>(arguments);
             Object mergeStrategy = r.get("mergeStrategy");
-            if (mergeStrategy instanceof String) {
-                r.put("mergeStrategy", ((String) mergeStrategy).toUpperCase(Locale.ROOT));
+            if (mergeStrategy instanceof String string) {
+                r.put("mergeStrategy", string.toUpperCase(Locale.ROOT));
             }
             return r;
         }

@@ -9,9 +9,10 @@ import hudson.plugins.git.GitChangeSet.Path;
 import hudson.scm.RepositoryBrowser;
 
 import org.kohsuke.stapler.Stapler;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 import java.io.IOException;
+import java.io.Serial;
 import java.net.IDN;
 import java.net.InetAddress;
 import java.net.MalformedURLException;
@@ -24,8 +25,6 @@ import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
-
-import org.apache.commons.lang.StringUtils;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 
@@ -48,7 +47,7 @@ public abstract class GitRepositoryBrowser extends RepositoryBrowser<GitChangeSe
 
     public final URL getUrl() throws IOException {
         String u = url;
-        StaplerRequest req = Stapler.getCurrentRequest();
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
         if (req != null) {
             Job job = req.findAncestorObject(Job.class);
             if (job != null) {
@@ -102,7 +101,7 @@ public abstract class GitRepositoryBrowser extends RepositoryBrowser<GitChangeSe
      */
     @CheckForNull
     public URL getChangeSetLink(final String commitId) throws IOException {
-        if (!StringUtils.isBlank(commitId)) {
+        if (commitId != null && !commitId.isBlank()) {
             return getChangeSetLink(new CommitChangeSet(commitId));
         }
         return null;
@@ -227,5 +226,6 @@ public abstract class GitRepositoryBrowser extends RepositoryBrowser<GitChangeSe
         }
     }
 
+    @Serial
     private static final long serialVersionUID = 1L;
 }

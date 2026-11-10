@@ -9,11 +9,13 @@ import hudson.scm.RepositoryBrowser;
 import hudson.scm.browsers.QueryBuilder;
 import net.sf.json.JSONObject;
 
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
 import java.io.IOException;
+import java.io.Serial;
 import java.net.URL;
 
 /**
@@ -21,6 +23,7 @@ import java.net.URL;
  */
 public class KilnGit extends GitRepositoryBrowser {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     @DataBoundConstructor
@@ -43,7 +46,7 @@ public class KilnGit extends GitRepositoryBrowser {
     @Override
     public URL getChangeSetLink(GitChangeSet changeSet) throws IOException {
         URL url = getUrl();
-        return encodeURL(new URL(url, url.getPath() + "History/" + changeSet.getId() + param(url).toString()));
+        return encodeURL(new URL(url, url.getPath() + "History/" + changeSet.getId() + param(url)));
     }
 
     /**
@@ -76,7 +79,7 @@ public class KilnGit extends GitRepositoryBrowser {
         if (i >= 0) {
             // Kiln diff indices begin at 1.
             URL url = getUrl();
-            return new URL(getChangeSetLink(changeSet), param(url).toString() + "#diff-" + String.valueOf(i + 1));
+            return new URL(getChangeSetLink(changeSet), param(url) + "#diff-" + (i + 1));
         }
         return getChangeSetLink(changeSet);
     }
@@ -96,11 +99,12 @@ public class KilnGit extends GitRepositoryBrowser {
         } else {
             GitChangeSet changeSet = path.getChangeSet();
             URL url = getUrl();
-            return encodeURL(new URL(url, url.getPath() + "FileHistory/" + path.getPath() + param(url).add("rev=" + changeSet.getId()).toString()));
+            return encodeURL(new URL(url, url.getPath() + "FileHistory/" + path.getPath() + param(url).add("rev=" + changeSet.getId())));
         }
     }
 
     @Extension
+    @Symbol("kiln")
     public static class KilnGitDescriptor extends Descriptor<RepositoryBrowser<?>> {
         @NonNull
         public String getDisplayName() {
@@ -108,8 +112,7 @@ public class KilnGit extends GitRepositoryBrowser {
         }
 
         @Override
-        public KilnGit newInstance(StaplerRequest req, @NonNull JSONObject jsonObject) throws FormException {
-            assert req != null; //see inherited javadoc
+        public KilnGit newInstance(@NonNull StaplerRequest2 req, @NonNull JSONObject jsonObject) throws FormException {
             return req.bindJSON(KilnGit.class, jsonObject);
         }
     }

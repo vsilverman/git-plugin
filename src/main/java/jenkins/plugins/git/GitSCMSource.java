@@ -50,15 +50,17 @@ import hudson.security.ACL;
 import hudson.security.ACLContext;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
+
+import java.io.IOException;
 import java.io.ObjectStreamException;
 import java.io.PrintWriter;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -93,7 +95,9 @@ import jenkins.scm.impl.form.NamedArrayList;
 import jenkins.scm.impl.trait.Discovery;
 import jenkins.scm.impl.trait.Selection;
 import jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait;
-import org.apache.commons.lang.StringUtils;
+import jenkins.security.FIPS140;
+import jenkins.util.SystemProperties;
+import org.apache.commons.lang3.StringUtils;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.URIish;
 import org.jenkinsci.Symbol;
@@ -105,8 +109,9 @@ import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
+import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
  * A {@link SCMSource} that discovers branches in a git repository.
@@ -122,6 +127,29 @@ public class GitSCMSource extends AbstractGitSCMSource {
 
     @CheckForNull
     private String credentialsId;
+
+    static final String IGNORE_TAG_DISCOVERY_TRAIT_PROPERTY = GitSCMSource.class.getName() + ".IGNORE_TAG_DISCOVERY_TRAIT";
+
+    /**
+     * Ignore the tag discovery trait when fetching multibranch Pipelines.
+     *
+     * Git plugin versions 5.7.0 and earlier will always fetch tags
+     * when scanning a multibranch Pipeline, whether or not the tag
+     * discovery trait had been added. Releases after git plugin 5.7.0
+     * honor the tag discovery trait when scanning a multibranch
+     * Pipeline. If the tag discovery trait has been added, then tags
+     * are fetched. If the tag discovery trait has not been added,
+     * then tags are not fetched.
+     *
+     * If honoring the tag discovery trait causes problems for a user,
+     * a Java property can be set during Jenkins startup to restore
+     * the previous (buggy) behavior.
+     *
+     * Refer to the plugin documentation for more details.
+     */
+    @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL")
+    public static /* not final */ boolean IGNORE_TAG_DISCOVERY_TRAIT =
+            SystemProperties.getBoolean(IGNORE_TAG_DISCOVERY_TRAIT_PROPERTY);
 
     @Deprecated
     private transient String remoteName;
@@ -161,6 +189,10 @@ public class GitSCMSource extends AbstractGitSCMSource {
 
     @DataBoundSetter
     public void setCredentialsId(@CheckForNull String credentialsId) {
+        if (!isFIPSCompliantTLS(credentialsId, this.remote)) {
+            LOGGER.log(Level.SEVERE, Messages.git_fips_url_notsecured());
+            throw new IllegalArgumentException(Messages.git_fips_url_notsecured());
+        }
         this.credentialsId = credentialsId;
     }
 
@@ -181,7 +213,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
         if (!DEFAULT_INCLUDES.equals(includes) || !DEFAULT_EXCLUDES.equals(excludes)) {
             traits.add(new WildcardSCMHeadFilterTrait(includes, excludes));
         }
-        if (!DEFAULT_REMOTE_NAME.equals(remoteName) && StringUtils.isNotBlank(remoteName)) {
+        if (remoteName != null && !remoteName.isBlank() && !DEFAULT_REMOTE_NAME.equals(remoteName)) {
             traits.add(new RemoteNameSCMSourceTrait(remoteName));
         }
         if (ignoreOnPushNotifications) {
@@ -213,8 +245,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
                 EXTENSIONS:
                 for (GitSCMExtension extension : extensions) {
                     for (SCMSourceTraitDescriptor d : SCMSourceTrait.all()) {
-                        if (d instanceof GitSCMExtensionTraitDescriptor) {
-                            GitSCMExtensionTraitDescriptor descriptor = (GitSCMExtensionTraitDescriptor) d;
+                        if (d instanceof GitSCMExtensionTraitDescriptor descriptor) {
                             if (descriptor.getExtensionClass().isInstance(extension)) {
                                 try {
                                     SCMSourceTrait trait = descriptor.convertToTrait(extension);
@@ -233,10 +264,10 @@ public class GitSCMSource extends AbstractGitSCMSource {
                     }
                 }
             }
-            if (remoteName != null && !DEFAULT_REMOTE_NAME.equals(remoteName) && StringUtils.isNotBlank(remoteName)) {
+            if (remoteName != null && !remoteName.isBlank() && !DEFAULT_REMOTE_NAME.equals(remoteName)) {
                 traits.add(new RemoteNameSCMSourceTrait(remoteName));
             }
-            if (StringUtils.isNotBlank(gitTool)) {
+            if (gitTool != null && !gitTool.isBlank()) {
                 traits.add(new GitToolSCMSourceTrait(gitTool));
             }
             if (browser != null) {
@@ -264,7 +295,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
             if (!defaults.contains(rawRefSpecs.trim())) {
                 List<String> templates = new ArrayList<>();
                 for (String rawRefSpec : rawRefSpecs.split(" ")) {
-                    if (StringUtils.isBlank(rawRefSpec)) {
+                    if (rawRefSpec == null || rawRefSpec.isBlank()) {
                         continue;
                     }
                     if (defaults.contains(rawRefSpec)) {
@@ -288,17 +319,12 @@ public class GitSCMSource extends AbstractGitSCMSource {
         return SCMTrait.find(traits, IgnoreOnPushNotificationTrait.class) != null;
     }
 
-
     // For Stapler only
     @Restricted(DoNotUse.class)
     @DataBoundSetter
     public void setBrowser(GitRepositoryBrowser browser) {
         List<SCMSourceTrait> traits = new ArrayList<>(this.traits);
-        for (Iterator<SCMSourceTrait> iterator = traits.iterator(); iterator.hasNext(); ) {
-            if (iterator.next() instanceof GitBrowserSCMSourceTrait) {
-                iterator.remove();
-            }
-        }
+        traits.removeIf(scmSourceTrait -> scmSourceTrait instanceof GitBrowserSCMSourceTrait);
         if (browser != null) {
             traits.add(new GitBrowserSCMSourceTrait(browser));
         }
@@ -311,11 +337,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
     public void setGitTool(String gitTool) {
         List<SCMSourceTrait> traits = new ArrayList<>(this.traits);
         gitTool = Util.fixEmptyAndTrim(gitTool);
-        for (Iterator<SCMSourceTrait> iterator = traits.iterator(); iterator.hasNext(); ) {
-            if (iterator.next() instanceof GitToolSCMSourceTrait) {
-                iterator.remove();
-            }
-        }
+        traits.removeIf(scmSourceTrait -> scmSourceTrait instanceof GitToolSCMSourceTrait);
         if (gitTool != null) {
             traits.add(new GitToolSCMSourceTrait(gitTool));
         }
@@ -328,16 +350,11 @@ public class GitSCMSource extends AbstractGitSCMSource {
     @Deprecated
     public void setExtensions(@CheckForNull List<GitSCMExtension> extensions) {
         List<SCMSourceTrait> traits = new ArrayList<>(this.traits);
-        for (Iterator<SCMSourceTrait> iterator = traits.iterator(); iterator.hasNext(); ) {
-            if (iterator.next() instanceof GitSCMExtensionTrait) {
-                iterator.remove();
-            }
-        }
+        traits.removeIf(scmSourceTrait -> scmSourceTrait instanceof GitSCMExtensionTrait);
         EXTENSIONS:
         for (GitSCMExtension extension : Util.fixNull(extensions)) {
             for (SCMSourceTraitDescriptor d : SCMSourceTrait.all()) {
-                if (d instanceof GitSCMExtensionTraitDescriptor) {
-                    GitSCMExtensionTraitDescriptor descriptor = (GitSCMExtensionTraitDescriptor) d;
+                if (d instanceof GitSCMExtensionTraitDescriptor descriptor) {
                     if (descriptor.getExtensionClass().isInstance(extension)) {
                         try {
                             SCMSourceTrait trait = descriptor.convertToTrait(extension);
@@ -374,12 +391,12 @@ public class GitSCMSource extends AbstractGitSCMSource {
         String remoteName = null;
         RefSpecsSCMSourceTrait refSpecs = null;
         for (SCMSourceTrait trait : traits) {
-            if (trait instanceof RemoteNameSCMSourceTrait) {
-                remoteName = ((RemoteNameSCMSourceTrait) trait).getRemoteName();
+            if (trait instanceof RemoteNameSCMSourceTrait sourceTrait) {
+                remoteName = sourceTrait.getRemoteName();
                 if (refSpecs != null) break;
             }
-            if (trait instanceof RefSpecsSCMSourceTrait) {
-                refSpecs = (RefSpecsSCMSourceTrait) trait;
+            if (trait instanceof RefSpecsSCMSourceTrait sourceTrait) {
+                refSpecs = sourceTrait;
                 if (remoteName != null) break;
             }
         }
@@ -414,12 +431,11 @@ public class GitSCMSource extends AbstractGitSCMSource {
 
     @NonNull
     @Override
-    @SuppressFBWarnings(value="EI_EXPOSE_REP", justification="Low risk")
     public List<SCMSourceTrait> getTraits() {
         return traits;
     }
 
-    @Symbol("git")
+    @Symbol({"gitSource", "git"})
     @Extension
     public static class DescriptorImpl extends SCMSourceDescriptor {
 
@@ -438,7 +454,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
             return new StandardListBoxModel()
                     .includeEmptyValue()
                     .includeMatchingAs(
-                            context instanceof Queue.Task ? Tasks.getAuthenticationOf((Queue.Task)context) : ACL.SYSTEM,
+                            context instanceof Queue.Task t ? Tasks.getAuthenticationOf(t) : ACL.SYSTEM,
                             context,
                             StandardUsernameCredentials.class,
                             URIRequirementBuilder.fromUri(remote).build(),
@@ -446,6 +462,18 @@ public class GitSCMSource extends AbstractGitSCMSource {
                     .includeCurrentValue(credentialsId);
         }
 
+        @RequirePOST
+        public FormValidation doCheckRemote(@AncestorInPath Item item,
+                                         @QueryParameter String credentialsId,
+                                         @QueryParameter String remote) throws IOException, InterruptedException {
+            if (item == null && !Jenkins.get().hasPermission(Jenkins.MANAGE) ||
+                item != null && !item.hasPermission(Item.CONFIGURE)) {
+                return FormValidation.warning("Not allowed to modify remote");
+            }
+            return isFIPSCompliantTLS(credentialsId, remote) ? FormValidation.ok() : FormValidation.error(hudson.plugins.git.Messages.git_fips_url_notsecured());
+        }
+
+        @RequirePOST
         public FormValidation doCheckCredentialsId(@AncestorInPath Item context,
                                                    @QueryParameter String remote,
                                                    @QueryParameter String value) {
@@ -466,15 +494,15 @@ public class GitSCMSource extends AbstractGitSCMSource {
                 return FormValidation.ok();
             }
 
-            for (ListBoxModel.Option o : CredentialsProvider.listCredentials(
+            for (ListBoxModel.Option o : CredentialsProvider.listCredentialsInItem(
                     StandardUsernameCredentials.class,
                     context,
-                    context instanceof Queue.Task
-                            ? Tasks.getAuthenticationOf((Queue.Task) context)
-                            : ACL.SYSTEM,
+                    context instanceof Queue.Task t
+                            ? Tasks.getAuthenticationOf2(t)
+                            : ACL.SYSTEM2,
                     URIRequirementBuilder.fromUri(remote).build(),
                     GitClient.CREDENTIALS_MATCHER)) {
-                if (StringUtils.equals(value, o.value)) {
+                if (Objects.equals(value, o.value)) {
                     // TODO check if this type of credential is acceptable to the Git client or does it merit warning
                     // NOTE: we would need to actually lookup the credential to do the check, which may require
                     // fetching the actual credential instance from a remote credentials store. Perhaps this is
@@ -536,7 +564,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
         }
 
         public List<SCMSourceTrait> getTraitsDefaults() {
-            return Collections.<SCMSourceTrait>singletonList(new BranchDiscoveryTrait());
+            return Collections.singletonList(new BranchDiscoveryTrait());
         }
 
         @NonNull
@@ -578,8 +606,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
 
                             @Override
                             public boolean isMatch(SCMSource source) {
-                                if (source instanceof GitSCMSource) {
-                                    GitSCMSource git = (GitSCMSource) source;
+                                if (source instanceof GitSCMSource git) {
                                     GitSCMSourceContext ctx =
                                             new GitSCMSourceContext<>(null, SCMHeadObserver.none())
                                                     .withTraits(git.getTraits());
@@ -605,8 +632,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
                             @NonNull
                             @Override
                             public Map<SCMHead, SCMRevision> heads(@NonNull SCMSource source) {
-                                if (source instanceof GitSCMSource) {
-                                    GitSCMSource git = (GitSCMSource) source;
+                                if (source instanceof GitSCMSource git) {
                                     GitSCMSourceContext<?,?> ctx =
                                             new GitSCMSourceContext<>(null, SCMHeadObserver.none())
                                                     .withTraits(git.getTraits());
@@ -627,7 +653,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
                                                 return Collections.emptyMap();
                                             }
                                         }
-                                        return Collections.<SCMHead, SCMRevision>singletonMap(head,
+                                        return Collections.singletonMap(head,
                                                 sha1 != null ? new GitBranchSCMRevision(head, sha1) : null);
                                     }
                                 }
@@ -643,8 +669,7 @@ public class GitSCMSource extends AbstractGitSCMSource {
                 } else {
                     for (final SCMSourceOwner owner : SCMSourceOwners.all()) {
                         for (SCMSource source : owner.getSCMSources()) {
-                            if (source instanceof GitSCMSource) {
-                                GitSCMSource git = (GitSCMSource) source;
+                            if (source instanceof GitSCMSource git) {
                                 GitSCMSourceContext<?, ?> ctx =
                                         new GitSCMSourceContext<>(null, SCMHeadObserver.none())
                                                 .withTraits(git.getTraits());
@@ -659,13 +684,13 @@ public class GitSCMSource extends AbstractGitSCMSource {
                                     continue;
                                 }
                                 if (GitStatus.looselyMatches(uri, remote)) {
-                                    LOGGER.info("Triggering the indexing of " + owner.getFullDisplayName()
+                                    LOGGER.fine("Triggering the indexing of " + owner.getFullDisplayName()
                                             + " as a result of event from " + origin);
                                     triggerIndexing(owner, source);
                                     result.add(new GitStatus.ResponseContributor() {
                                         @Override
                                         @SuppressWarnings("deprecation")
-                                        public void addHeaders(StaplerRequest req, StaplerResponse rsp) {
+                                        public void addHeaders(StaplerRequest2 req, StaplerResponse2 rsp) {
                                             // Calls a deprecated getAbsoluteUrl() method because this is a remote API case
                                             // as described in the Javadoc of the deprecated getAbsoluteUrl() method.
                                             rsp.addHeader("Triggered", owner.getAbsoluteUrl());

@@ -1,7 +1,5 @@
 package hudson.plugins.git.util;
 
-import com.infradna.tool.bridge_method_injector.WithBridgeMethods;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.EnvVars;
 import hudson.FilePath;
 import hudson.Launcher;
@@ -24,6 +22,7 @@ import org.jenkinsci.plugins.gitclient.GitClient;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.Serial;
 import java.io.Serializable;
 import java.text.MessageFormat;
 import java.util.*;
@@ -31,17 +30,14 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 public class GitUtils implements Serializable {
     
-    @SuppressFBWarnings(value="SE_BAD_FIELD", justification="known non-serializable field")
     @NonNull
     GitClient git;
     @NonNull
     TaskListener listener;
 
-    @SuppressFBWarnings(value="EI_EXPOSE_REP2", justification="Low risk")
     public GitUtils(@NonNull TaskListener listener, @NonNull GitClient git) {
         this.git = git;
         this.listener = listener;
@@ -200,8 +196,7 @@ public class GitUtils implements Serializable {
      * @return filtered tip branches
      * @throws InterruptedException when interrupted
      */
-    @WithBridgeMethods(Collection.class)
-    public List<Revision> filterTipBranches(final Collection<Revision> revisions) throws InterruptedException {
+    public List<Revision> filterTipBranches(final Collection<Revision> revisions) throws GitException, InterruptedException {
         // If we have 3 branches that we might want to build
         // ----A--.---.--- B
         //        \-----C
@@ -311,7 +306,7 @@ public class GitUtils implements Serializable {
                 if (lastComputer != null) {
                     env = lastComputer.getEnvironment().overrideAll(b.getCharacteristicEnvVars());
                     for (NodeProperty nodeProperty : lastBuiltOn.getNodeProperties()) {
-                        Environment environment = nodeProperty.setUp(b, launcher, (BuildListener) buildListener);
+                        Environment environment = nodeProperty.setUp(b, launcher, buildListener);
                         if (environment != null) {
                             environment.buildEnvVars(env);
                         }
@@ -349,7 +344,7 @@ public class GitUtils implements Serializable {
             env.put("WORKSPACE", ws.getRemote());
 
         for (NodeProperty nodeProperty: jenkinsInstance.getGlobalNodeProperties()) {
-            Environment environment = nodeProperty.setUp(b, launcher, (BuildListener)buildListener);
+            Environment environment = nodeProperty.setUp(b, launcher, buildListener);
             if (environment != null) {
                 environment.buildEnvVars(env);
             }
@@ -367,8 +362,7 @@ public class GitUtils implements Serializable {
         List<? extends Action> buildActions = b.getAllActions();
         for (Action action : buildActions) {
             // most importantly, ParametersAction will be processed here (for parameterized builds)
-            if (action instanceof ParametersAction) {
-                ParametersAction envAction = (ParametersAction) action;
+            if (action instanceof ParametersAction envAction) {
                 envAction.buildEnvironment(b, env);
             }
         }
@@ -412,5 +406,6 @@ public class GitUtils implements Serializable {
 
     private static final Logger LOGGER = Logger.getLogger(GitUtils.class.getName());
 
+    @Serial
     private static final long serialVersionUID = 1L;
 }

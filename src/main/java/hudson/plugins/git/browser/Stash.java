@@ -9,10 +9,11 @@ import hudson.scm.RepositoryBrowser;
 import hudson.scm.browsers.QueryBuilder;
 import net.sf.json.JSONObject;
 import org.kohsuke.stapler.DataBoundConstructor;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
 import java.io.IOException;
+import java.io.Serial;
 import java.net.URL;
 
 /**
@@ -20,6 +21,7 @@ import java.net.URL;
  */
 public class Stash extends GitRepositoryBrowser {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     @DataBoundConstructor
@@ -59,9 +61,9 @@ public class Stash extends GitRepositoryBrowser {
         URL url = getUrl();
 
         if (path.getEditType() == EditType.DELETE) {
-            return new URL(url, url.getPath() + "diff/" + path.getPath() + param(url).add("at=" + changeSet.getParentCommit()).add("until=" + changeSet.getId()).toString());
+            return new URL(url, url.getPath() + "diff/" + path.getPath() + param(url).add("at=" + changeSet.getParentCommit()).add("until=" + changeSet.getId()));
         } else {
-            return new URL(url, url.getPath() + "diff/" + path.getPath() + param(url).add("at=" + changeSet.getId()).add("until=" + changeSet.getId()).toString());
+            return new URL(url, url.getPath() + "diff/" + path.getPath() + param(url).add("at=" + changeSet.getId()).add("until=" + changeSet.getId()));
         }
     }
 
@@ -79,13 +81,14 @@ public class Stash extends GitRepositoryBrowser {
         URL url = getUrl();
 
         if (path.getEditType() == EditType.DELETE) {
-            return encodeURL(new URL(url, url.getPath() + "browse/" + path.getPath() + param(url).add("at=" + changeSet.getParentCommit()).toString()));
+            return encodeURL(new URL(url, url.getPath() + "browse/" + path.getPath() + param(url).add("at=" + changeSet.getParentCommit())));
         } else {
-            return encodeURL(new URL(url, url.getPath() + "browse/" + path.getPath() + param(url).add("at=" + changeSet.getId()).toString()));
+            return encodeURL(new URL(url, url.getPath() + "browse/" + path.getPath() + param(url).add("at=" + changeSet.getId())));
         }
     }
 
     @Extension
+    // @Symbol("stash") // Intentionally not providing a symbol named 'stash', would collide with existing 'stash' Pipeline step
     public static class StashDescriptor extends Descriptor<RepositoryBrowser<?>> {
         @NonNull
         public String getDisplayName() {
@@ -93,8 +96,7 @@ public class Stash extends GitRepositoryBrowser {
         }
 
         @Override
-        public Stash newInstance(StaplerRequest req, @NonNull JSONObject jsonObject) throws FormException {
-            assert req != null; //see inherited javadoc
+        public Stash newInstance(@NonNull StaplerRequest2 req, @NonNull JSONObject jsonObject) throws FormException {
             return req.bindJSON(Stash.class, jsonObject);
         }
     }

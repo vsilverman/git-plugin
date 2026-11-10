@@ -26,6 +26,7 @@ package jenkins.plugins.git;
 import hudson.EnvVars;
 import hudson.Launcher;
 import hudson.model.TaskListener;
+import hudson.plugins.git.util.GitUtilsTest;
 import hudson.util.ArgumentListBuilder;
 import hudson.util.StreamTaskListener;
 import hudson.plugins.git.GitException;
@@ -33,15 +34,17 @@ import hudson.plugins.git.GitException;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.eclipse.jgit.lib.Repository;
 import static org.hamcrest.Matchers.hasItems;
+import static org.junit.jupiter.api.Assertions.*;
+
 import org.jenkinsci.plugins.gitclient.GitClient;
-import org.junit.Assert;
+
 import static org.hamcrest.MatcherAssert.assertThat;
 
 /**
@@ -59,12 +62,16 @@ public class CliGitCommand {
     private String[] output;
     private ArgumentListBuilder args;
 
-    public CliGitCommand(GitClient client, String... arguments) {
+    public CliGitCommand(GitClient client, String... arguments) throws GitException {
+        this(client, GitUtilsTest.getConfigNoSystemEnvsVars(), arguments);
+    }
+
+    public CliGitCommand(GitClient client, EnvVars envVars, String... arguments) throws GitException {
         args = new ArgumentListBuilder("git");
         args.add(arguments);
         listener = StreamTaskListener.NULL;
         launcher = new Launcher.LocalLauncher(listener);
-        env = new EnvVars();
+        env = envVars;
         if (client != null) {
             try (@SuppressWarnings("deprecation") // Local repository reference
                  Repository repo = client.getRepository()) {
@@ -75,10 +82,14 @@ public class CliGitCommand {
         }
     }
 
-    public String[] run(String... arguments) throws IOException, InterruptedException {
+    public String[] run(boolean checkForErrors, String... arguments) throws IOException, InterruptedException {
         args = new ArgumentListBuilder("git");
         args.add(arguments);
-        return run(true);
+        return run(checkForErrors);
+    }
+
+    public String[] run(String... arguments) throws IOException, InterruptedException {
+        return run(true, arguments);
     }
 
     public String[] run() throws IOException, InterruptedException {
@@ -90,13 +101,13 @@ public class CliGitCommand {
         ByteArrayOutputStream bytesErr = new ByteArrayOutputStream();
         Launcher.ProcStarter p = launcher.launch().cmds(args).envs(env).stdout(bytesOut).stderr(bytesErr).pwd(dir);
         int status = p.start().joinWithTimeout(1, TimeUnit.MINUTES, listener);
-        String result = bytesOut.toString("UTF-8");
+        String result = bytesOut.toString(StandardCharsets.UTF_8);
         if (bytesErr.size() > 0) {
-            result = result + "\nstderr not empty:\n" + bytesErr.toString("UTF-8");
+            result = result + "\nstderr not empty:\n" + bytesErr.toString(StandardCharsets.UTF_8);
         }
         output = result.split("[\\n\\r]");
         if (assertProcessStatus) {
-            Assert.assertEquals(args.toString() + " command failed and reported '" + Arrays.toString(output) + "'", 0, status);
+            assertEquals(0, status, args.toString() + " command failed and reported '" + Arrays.toString(output) + "'");
         }
         return output;
     }
@@ -104,28 +115,18 @@ public class CliGitCommand {
     public void assertOutputContains(String... expectedRegExes) {
         List<String> notFound = new ArrayList<>();
         boolean modified = notFound.addAll(Arrays.asList(expectedRegExes));
-        Assert.assertTrue("Missing regular expressions in assertion", modified);
+        assertTrue(modified, "Missing regular expressions in assertion");
         for (String line : output) {
-            for (Iterator<String> iterator = notFound.iterator(); iterator.hasNext();) {
-                String regex = iterator.next();
-                if (line.matches(regex)) {
-                    iterator.remove();
-                }
-            }
+            notFound.removeIf(line::matches);
         }
         if (!notFound.isEmpty()) {
-            Assert.fail(Arrays.toString(output) + " did not match all strings in notFound: " + Arrays.toString(expectedRegExes));
+            fail(Arrays.toString(output) + " did not match all strings in notFound: " + Arrays.toString(expectedRegExes));
         }
-    }
-
-    private String[] runWithoutAssert(String... arguments) throws IOException, InterruptedException {
-        args = new ArgumentListBuilder("git");
-        args.add(arguments);
-        return run(false);
     }
 
     private void setConfigIfEmpty(String configName, String value) throws Exception {
-        String[] cmdOutput = runWithoutAssert("config", "--global", configName);
+        boolean checkForErrors = false;
+        String[] cmdOutput = run(checkForErrors, "config", "--global", configName);
         if (cmdOutput == null || cmdOutput[0].isEmpty() || cmdOutput[0].equals("[]")) {
             /* Set config value globally */
             cmdOutput = run("config", "--global", configName, value);
@@ -155,4 +156,16 @@ public class CliGitCommand {
 	    setConfigIfEmpty("user.email", "email.from.git.plugin.test@example.com");
 	}
     }
+
+    /**
+     * This will add env value to the process running the command line
+     * @param key env var name
+     * @param value env var value
+     * @return the current {@link CliGitCommand}
+     */
+    public CliGitCommand env(String key, String value) {
+        env.put(key, value);
+        return this;
+    }
+
 }

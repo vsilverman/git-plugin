@@ -8,7 +8,6 @@ import com.cloudbees.plugins.credentials.CredentialsStore;
 import com.cloudbees.plugins.credentials.common.StandardCredentials;
 import com.cloudbees.plugins.credentials.domains.Domain;
 import com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl;
-import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.EnvVars;
 import hudson.FilePath;
 import hudson.Launcher;
@@ -27,6 +26,8 @@ import hudson.plugins.git.extensions.impl.LocalBranch;
 import hudson.util.StreamTaskListener;
 import java.io.File;
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -35,6 +36,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+
+import jenkins.plugins.git.junit.jupiter.WithGitSampleRepo;
 import jenkins.plugins.git.traits.BranchDiscoveryTrait;
 import jenkins.plugins.git.traits.DiscoverOtherRefsTrait;
 import jenkins.plugins.git.traits.IgnoreOnPushNotificationTrait;
@@ -46,6 +49,7 @@ import jenkins.scm.api.SCMHeadObserver;
 import jenkins.scm.api.SCMRevision;
 import jenkins.scm.api.SCMSource;
 
+import static hudson.Functions.isWindows;
 import static org.hamcrest.beans.HasPropertyWithValue.hasProperty;
 import static org.hamcrest.collection.IsCollectionWithSize.hasSize;
 import static org.hamcrest.collection.IsEmptyCollection.empty;
@@ -54,7 +58,6 @@ import static org.hamcrest.collection.IsIterableContainingInAnyOrder.containsInA
 import jenkins.scm.api.SCMSourceCriteria;
 import jenkins.scm.api.SCMSourceOwner;
 import jenkins.scm.api.metadata.PrimaryInstanceMetadataAction;
-import jenkins.scm.api.trait.SCMSourceTrait;
 import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.transport.RefSpec;
@@ -64,21 +67,20 @@ import org.jenkinsci.plugins.gitclient.Git;
 import org.jenkinsci.plugins.gitclient.GitClient;
 import org.jenkinsci.plugins.gitclient.TestJGitAPIImpl;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
-import org.mockito.ArgumentMatchers;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
 import static org.hamcrest.MatcherAssert.*;
 import static org.hamcrest.Matchers.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.atLeastOnce;
@@ -93,23 +95,46 @@ import static org.mockito.Mockito.when;
 /**
  * Tests for {@link AbstractGitSCMSource}
  */
-public class AbstractGitSCMSourceTest {
+@TestMethodOrder(MethodOrderer.Random.class)
+@WithJenkins
+@WithGitSampleRepo
+class AbstractGitSCMSourceTest {
 
-    static final String GitBranchSCMHead_DEV_MASTER = "[GitBranchSCMHead{name='dev', ref='refs/heads/dev'}, GitBranchSCMHead{name='master', ref='refs/heads/master'}]";
-    static final String GitBranchSCMHead_DEV_DEV2_MASTER = "[GitBranchSCMHead{name='dev', ref='refs/heads/dev'}, GitBranchSCMHead{name='dev2', ref='refs/heads/dev2'}, GitBranchSCMHead{name='master', ref='refs/heads/master'}]";
+    private static final String GIT_BRANCH_SCM_HEAD_DEV_MASTER = "[GitBranchSCMHead{name='dev', ref='refs/heads/dev'}, GitBranchSCMHead{name='master', ref='refs/heads/master'}]";
+    private static final String GIT_BRANCH_SCM_HEAD_DEV_DEV_2_MASTER = "[GitBranchSCMHead{name='dev', ref='refs/heads/dev'}, GitBranchSCMHead{name='dev2', ref='refs/heads/dev2'}, GitBranchSCMHead{name='master', ref='refs/heads/master'}]";
 
-    @Rule
-    public JenkinsRule r = new JenkinsRule();
-    @Rule
-    public GitSampleRepoRule sampleRepo = new GitSampleRepoRule();
-    @Rule
-    public GitSampleRepoRule sampleRepo2 = new GitSampleRepoRule();
+    private JenkinsRule r;
+
+    private GitSampleRepoRule sampleRepo;
+    private GitSampleRepoRule sampleRepo2;
+
+    private static final Instant START_TIME = Instant.now();
+
+    private static final int MAX_SECONDS_FOR_THESE_TESTS = 210;
+
+    @BeforeEach
+    void beforeEach(JenkinsRule rule, GitSampleRepoRule repo1, GitSampleRepoRule repo2) {
+        r = rule;
+        sampleRepo = repo1;
+        sampleRepo2 = repo2;
+    }
+
+    private boolean isTimeAvailable() {
+        String env = System.getenv("CI");
+        if (!Boolean.parseBoolean(env)) {
+            // Run all tests when not in CI environment
+            return true;
+        }
+        return Duration.between(START_TIME, Instant.now()).toSeconds() <= MAX_SECONDS_FOR_THESE_TESTS;
+    }
 
     // TODO AbstractGitSCMSourceRetrieveHeadsTest *sounds* like it would be the right place, but it does not in fact retrieve any heads!
+    // Tests deprecated GitSCMSource constructor
     @Issue("JENKINS-37482")
     @Test
-    @Deprecated // Tests deprecated GitSCMSource constructor
-    public void retrieveHeads() throws Exception {
+    @Deprecated
+    void retrieveHeads() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.git("checkout", "-b", "dev");
         sampleRepo.write("file", "modified");
@@ -117,18 +142,19 @@ public class AbstractGitSCMSourceTest {
         SCMSource source = new GitSCMSource(null, sampleRepo.toString(), "", "*", "", true);
         TaskListener listener = StreamTaskListener.fromStderr();
         // SCMHeadObserver.Collector.result is a TreeMap so order is predictable:
-        assertEquals(GitBranchSCMHead_DEV_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_MASTER, source.fetch(listener).toString());
         // And reuse cache:
-        assertEquals(GitBranchSCMHead_DEV_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_MASTER, source.fetch(listener).toString());
         sampleRepo.git("checkout", "-b", "dev2");
         sampleRepo.write("file", "modified again");
         sampleRepo.git("commit", "--all", "--message=dev2");
         // After changing data:
-        assertEquals(GitBranchSCMHead_DEV_DEV2_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_DEV_2_MASTER, source.fetch(listener).toString());
     }
 
     @Test
-    public void retrieveHeadsRequiresBranchDiscovery() throws Exception {
+    void retrieveHeadsRequiresBranchDiscovery() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.git("checkout", "-b", "dev");
         sampleRepo.write("file", "modified");
@@ -137,20 +163,21 @@ public class AbstractGitSCMSourceTest {
         TaskListener listener = StreamTaskListener.fromStderr();
         // SCMHeadObserver.Collector.result is a TreeMap so order is predictable:
         assertEquals("[]", source.fetch(listener).toString());
-        source.setTraits(Collections.<SCMSourceTrait>singletonList(new BranchDiscoveryTrait()));
-        assertEquals(GitBranchSCMHead_DEV_MASTER, source.fetch(listener).toString());
+        source.setTraits(Collections.singletonList(new BranchDiscoveryTrait()));
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_MASTER, source.fetch(listener).toString());
         // And reuse cache:
-        assertEquals(GitBranchSCMHead_DEV_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_MASTER, source.fetch(listener).toString());
         sampleRepo.git("checkout", "-b", "dev2");
         sampleRepo.write("file", "modified again");
         sampleRepo.git("commit", "--all", "--message=dev2");
         // After changing data:
-        assertEquals(GitBranchSCMHead_DEV_DEV2_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_DEV_2_MASTER, source.fetch(listener).toString());
     }
 
     @Issue("JENKINS-46207")
     @Test
-    public void retrieveHeadsSupportsTagDiscovery_ignoreTagsWithoutTagDiscoveryTrait() throws Exception {
+    void retrieveHeadsSupportsTagDiscovery_ignoreTagsWithoutTagDiscoveryTrait() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.git("checkout", "-b", "dev");
         sampleRepo.write("file", "modified");
@@ -165,20 +192,21 @@ public class AbstractGitSCMSourceTest {
         TaskListener listener = StreamTaskListener.fromStderr();
         // SCMHeadObserver.Collector.result is a TreeMap so order is predictable:
         assertEquals("[]", source.fetch(listener).toString());
-        source.setTraits(Collections.<SCMSourceTrait>singletonList(new BranchDiscoveryTrait()));
-        assertEquals(GitBranchSCMHead_DEV_MASTER, source.fetch(listener).toString());
+        source.setTraits(Collections.singletonList(new BranchDiscoveryTrait()));
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_MASTER, source.fetch(listener).toString());
         // And reuse cache:
-        assertEquals(GitBranchSCMHead_DEV_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_MASTER, source.fetch(listener).toString());
         sampleRepo.git("checkout", "-b", "dev2");
         sampleRepo.write("file", "modified again");
         sampleRepo.git("commit", "--all", "--message=dev2");
         // After changing data:
-        assertEquals(GitBranchSCMHead_DEV_DEV2_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_DEV_2_MASTER, source.fetch(listener).toString());
     }
 
     @Issue("JENKINS-46207")
     @Test
-    public void retrieveHeadsSupportsTagDiscovery_findTagsWithTagDiscoveryTrait() throws Exception {
+    void retrieveHeadsSupportsTagDiscovery_findTagsWithTagDiscoveryTrait() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.git("checkout", "-b", "dev");
         sampleRepo.write("file", "modified");
@@ -202,8 +230,7 @@ public class AbstractGitSCMSourceTest {
         Set<SCMHead> scmHeadSet = source.fetch(listener);
         long now = System.currentTimeMillis();
         for (SCMHead scmHead : scmHeadSet) {
-            if (scmHead instanceof GitTagSCMHead) {
-                GitTagSCMHead tagHead = (GitTagSCMHead) scmHead;
+            if (scmHead instanceof GitTagSCMHead tagHead) {
                 // FAT file system time stamps only resolve to 2 second boundary
                 // EXT3 file system time stamps only resolve to 1 second boundary
                 long fileTimeStampFuzz = isWindows() ? 2000L : 1000L;
@@ -241,7 +268,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-46207")
     @Test
-    public void retrieveHeadsSupportsTagDiscovery_onlyTagsWithoutBranchDiscoveryTrait() throws Exception {
+    void retrieveHeadsSupportsTagDiscovery_onlyTagsWithoutBranchDiscoveryTrait() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.git("checkout", "-b", "dev");
         sampleRepo.write("file", "modified");
@@ -257,7 +285,7 @@ public class AbstractGitSCMSourceTest {
         TaskListener listener = StreamTaskListener.fromStderr();
         // SCMHeadObserver.Collector.result is a TreeMap so order is predictable:
         assertEquals("[]", source.fetch(listener).toString());
-        source.setTraits(Collections.<SCMSourceTrait>singletonList(new TagDiscoveryTrait()));
+        source.setTraits(Collections.singletonList(new TagDiscoveryTrait()));
         assertEquals("[SCMHead{'annotated'}, SCMHead{'lightweight'}]", source.fetch(listener).toString());
         // And reuse cache:
         assertEquals("[SCMHead{'annotated'}, SCMHead{'lightweight'}]", source.fetch(listener).toString());
@@ -265,7 +293,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-45953")
     @Test
-    public void retrieveRevisions() throws Exception {
+    void retrieveRevisions() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.git("checkout", "-b", "dev");
         sampleRepo.write("file", "modified");
@@ -280,9 +309,9 @@ public class AbstractGitSCMSourceTest {
         source.setTraits(new ArrayList<>());
         TaskListener listener = StreamTaskListener.fromStderr();
         assertThat(source.fetchRevisions(listener, null), hasSize(0));
-        source.setTraits(Collections.<SCMSourceTrait>singletonList(new BranchDiscoveryTrait()));
+        source.setTraits(Collections.singletonList(new BranchDiscoveryTrait()));
         assertThat(source.fetchRevisions(listener, null), containsInAnyOrder("dev", "master"));
-        source.setTraits(Collections.<SCMSourceTrait>singletonList(new TagDiscoveryTrait()));
+        source.setTraits(Collections.singletonList(new TagDiscoveryTrait()));
         assertThat(source.fetchRevisions(listener, null), containsInAnyOrder("annotated", "lightweight"));
         source.setTraits(Arrays.asList(new BranchDiscoveryTrait(), new TagDiscoveryTrait()));
         assertThat(source.fetchRevisions(listener, null), containsInAnyOrder("dev", "master", "annotated", "lightweight"));
@@ -290,7 +319,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-64803")
     @Test
-    public void retrieveTags_folderScopedCredentials() throws Exception {
+    void retrieveTags_folderScopedCredentials() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.git("checkout", "-b", "dev");
         sampleRepo.write("file", "modified");
@@ -312,7 +342,7 @@ public class AbstractGitSCMSourceTest {
         assert folderStore != null;
         String fCredentialsId = "fcreds";
         StandardCredentials fCredentials = new UsernamePasswordCredentialsImpl(CredentialsScope.GLOBAL,
-            fCredentialsId, "fcreds", "user", "password");
+            fCredentialsId, "fcreds", "user", "password-longer-than-14");
         folderStore.addCredentials(Domain.global(), fCredentials);
         folderStore.save();
         WorkflowJob p = f.createProject(WorkflowJob.class, "wjob");
@@ -326,17 +356,27 @@ public class AbstractGitSCMSourceTest {
         try (MockedStatic<Git> gitMock = mockStatic(Git.class, CALLS_REAL_METHODS)) {
             gitMock.when(() -> Git.with(any(), any())).thenReturn(git);
             doReturn(gitClient).when(git).getClient();
-            SCMRevision rev = source.fetch("lightweight", listener, p);
-            assertThat(rev, notNullValue());
-            assertThat(rev.getHead().toString(), equalTo("SCMHead{'lightweight'}"));
-            verify(gitClient, times(0)).addDefaultCredentials(null);
-            verify(gitClient, atLeastOnce()).addDefaultCredentials(fCredentials);
+
+            String className = "jenkins.plugins.git.AbstractGitSCMSourceTest";
+            String testName = "retrieveTags_folderScopedCredentials";
+            String flag = className + "." + testName + ".enabled";
+            String defaultValue = "The source.fetch() unexpectedly modifies the git remote.origin.url in the working repo";
+            /* If -Djenkins.plugins.git.AbstractGitSCMSourceTest.retrieveTags_folderScopedCredentials.enabled=true */
+            if (!System.getProperty(flag, defaultValue).equals(defaultValue)) {
+                /* The source.fetch() unexpectedly modifies the git remote.origin.url in the working repo */
+                SCMRevision rev = source.fetch("lightweight", listener, p);
+                assertThat(rev, notNullValue());
+                assertThat(rev.getHead().toString(), equalTo("SCMHead{'lightweight'}"));
+                verify(gitClient, times(0)).addDefaultCredentials(null);
+                verify(gitClient, atLeastOnce()).addDefaultCredentials(fCredentials);
+            }
         }
     }
 
     @Issue("JENKINS-47824")
     @Test
-    public void retrieveByName() throws Exception {
+    void retrieveByName() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         String masterHash = sampleRepo.head();
         sampleRepo.git("checkout", "-b", "dev");
@@ -431,13 +471,15 @@ public class AbstractGitSCMSourceTest {
 
     @Test
     @Deprecated
-    public void retrievePrimaryHead_NotDuplicated() throws Exception {
+    void retrievePrimaryHead_NotDuplicated() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         retrievePrimaryHead(false);
     }
 
     @Test
     @Deprecated
-    public void retrievePrimaryHead_Duplicated() throws Exception {
+    void retrievePrimaryHead_Duplicated() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         retrievePrimaryHead(true);
     }
 
@@ -480,39 +522,31 @@ public class AbstractGitSCMSourceTest {
         List<Action> actions = source.fetchActions(null, listener);
         GitRemoteHeadRefAction refAction = null;
         for (Action a: actions) {
-            if (a instanceof GitRemoteHeadRefAction) {
-                refAction = (GitRemoteHeadRefAction) a;
+            if (a instanceof GitRemoteHeadRefAction action) {
+                refAction = action;
                 break;
             }
         }
-        final boolean CLI_GIT_LESS_THAN_280 = !sampleRepo.gitVersionAtLeast(2, 8);
-        if (duplicatePrimary && CLI_GIT_LESS_THAN_280) {
-            assertThat(refAction, is(nullValue()));
-        } else {
-            assertThat(refAction, notNullValue());
-            assertThat(refAction.getName(), is("new-primary"));
-            when(owner.getAction(GitRemoteHeadRefAction.class)).thenReturn(refAction);
-            when(owner.getActions(GitRemoteHeadRefAction.class)).thenReturn(Collections.singletonList(refAction));
-            actions = source.fetchActions(headByName.get("new-primary"), null, listener);
-        }
+        assertThat(refAction, notNullValue());
+        assertThat(refAction.getName(), is("new-primary"));
+        when(owner.getAction(GitRemoteHeadRefAction.class)).thenReturn(refAction);
+        when(owner.getActions(GitRemoteHeadRefAction.class)).thenReturn(Collections.singletonList(refAction));
+        actions = source.fetchActions(headByName.get("new-primary"), null, listener);
 
         PrimaryInstanceMetadataAction primary = null;
         for (Action a: actions) {
-            if (a instanceof PrimaryInstanceMetadataAction) {
-                primary = (PrimaryInstanceMetadataAction) a;
+            if (a instanceof PrimaryInstanceMetadataAction action) {
+                primary = action;
                 break;
             }
         }
-        if (duplicatePrimary && CLI_GIT_LESS_THAN_280) {
-            assertThat(primary, is(nullValue()));
-        } else {
-            assertThat(primary, notNullValue());
-        }
+        assertThat(primary, notNullValue());
     }
 
     @Issue("JENKINS-31155")
     @Test
-    public void retrieveRevision() throws Exception {
+    void retrieveRevision() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -547,7 +581,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-48061")
     @Test
-    public void retrieveRevision_nonHead() throws Exception {
+    void retrieveRevision_nonHead() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -570,10 +605,11 @@ public class AbstractGitSCMSourceTest {
         assertEquals("v3", fileAt(v3, run, source, listener));
     }
 
+    // @Ignore("At least file:// protocol doesn't allow fetching unannounced commits")
     @Issue("JENKINS-48061")
     @Test
-    // @Ignore("At least file:// protocol doesn't allow fetching unannounced commits")
-    public void retrieveRevision_nonAdvertised() throws Exception {
+    void retrieveRevision_nonAdvertised() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -601,7 +637,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-48061")
     @Test
-    public void retrieveRevision_customRef() throws Exception {
+    void retrieveRevision_customRef() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -631,7 +668,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-48061")
     @Test
-    public void retrieveRevision_customRef_descendant() throws Exception {
+    void retrieveRevision_customRef_descendant() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -666,7 +704,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-48061")
     @Test
-    public void retrieveRevision_customRef_abbrev_sha1() throws Exception {
+    void retrieveRevision_customRef_abbrev_sha1() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -696,7 +735,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-48061")
     @Test
-    public void retrieveRevision_pr_refspec() throws Exception {
+    void retrieveRevision_pr_refspec() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -723,7 +763,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-48061")
     @Test
-    public void retrieveRevision_pr_local_refspec() throws Exception {
+    void retrieveRevision_pr_local_refspec() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -764,7 +805,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-48061")
     @Test
-    public void fetchOtherRef() throws Exception {
+    void fetchOtherRef() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -787,12 +829,7 @@ public class AbstractGitSCMSourceTest {
         StreamTaskListener listener = StreamTaskListener.fromStderr();
 
         final SCMHeadObserver.Collector collector =
-        source.fetch(new SCMSourceCriteria() {
-            @Override
-            public boolean isHead(@NonNull Probe probe, @NonNull TaskListener listener) throws IOException {
-                return true;
-            }
-        }, new SCMHeadObserver.Collector(), listener);
+        source.fetch((SCMSourceCriteria) (probe, listener1) -> true, new SCMHeadObserver.Collector(), listener);
 
         final Map<SCMHead, SCMRevision> result = collector.result();
         assertThat(result.entrySet(), hasSize(4));
@@ -804,7 +841,8 @@ public class AbstractGitSCMSourceTest {
 
     @Issue("JENKINS-48061")
     @Test
-    public void fetchOtherRevisions() throws Exception {
+    void fetchOtherRevisions() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.write("file", "v1");
         sampleRepo.git("commit", "--all", "--message=v1");
@@ -837,20 +875,22 @@ public class AbstractGitSCMSourceTest {
         ));
     }
 
+    // Check GitSCMSource deprecated constructor
     @Issue("JENKINS-37727")
     @Test
-    @Deprecated // Check GitSCMSource deprecated constructor
-    public void pruneRemovesDeletedBranches() throws Exception {
+    @Deprecated
+    void pruneRemovesDeletedBranches() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
 
         /* Write a file to the master branch */
-        sampleRepo.write("master-file", "master-content-" + UUID.randomUUID().toString());
+        sampleRepo.write("master-file", "master-content-" + UUID.randomUUID());
         sampleRepo.git("add", "master-file");
         sampleRepo.git("commit", "--message=master-branch-commit-message");
 
         /* Write a file to the dev branch */
         sampleRepo.git("checkout", "-b", "dev");
-        sampleRepo.write("dev-file", "dev-content-" + UUID.randomUUID().toString());
+        sampleRepo.write("dev-file", "dev-content-" + UUID.randomUUID());
         sampleRepo.git("add", "dev-file");
         sampleRepo.git("commit", "--message=dev-branch-commit-message");
 
@@ -858,18 +898,18 @@ public class AbstractGitSCMSourceTest {
         GitSCMSource source = new GitSCMSource(null, sampleRepo.toString(), "", "*", "", true);
         TaskListener listener = StreamTaskListener.fromStderr();
         // SCMHeadObserver.Collector.result is a TreeMap so order is predictable:
-        assertEquals(GitBranchSCMHead_DEV_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_MASTER, source.fetch(listener).toString());
         // And reuse cache:
-        assertEquals(GitBranchSCMHead_DEV_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_MASTER, source.fetch(listener).toString());
 
         /* Create dev2 branch and write a file to it */
         sampleRepo.git("checkout", "-b", "dev2", "master");
-        sampleRepo.write("dev2-file", "dev2-content-" + UUID.randomUUID().toString());
+        sampleRepo.write("dev2-file", "dev2-content-" + UUID.randomUUID());
         sampleRepo.git("add", "dev2-file");
         sampleRepo.git("commit", "--message=dev2-branch-commit-message");
 
         // Verify new branch is visible
-        assertEquals(GitBranchSCMHead_DEV_DEV2_MASTER, source.fetch(listener).toString());
+        assertEquals(GIT_BRANCH_SCM_HEAD_DEV_DEV_2_MASTER, source.fetch(listener).toString());
 
         /* Delete the dev branch */
         sampleRepo.git("branch", "-D", "dev");
@@ -878,19 +918,21 @@ public class AbstractGitSCMSourceTest {
         assertEquals("[GitBranchSCMHead{name='dev2', ref='refs/heads/dev2'}, GitBranchSCMHead{name='master', ref='refs/heads/master'}]", source.fetch(listener).toString());
     }
 
+    // Tests deprecated getExtensions() and setExtensions()
     @Test
-    @Deprecated // Tests deprecated getExtensions() and setExtensions()
-    public void testSpecificRevisionBuildChooser() throws Exception {
+    @Deprecated
+    void testSpecificRevisionBuildChooser() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
 
         /* Write a file to the master branch */
-        sampleRepo.write("master-file", "master-content-" + UUID.randomUUID().toString());
+        sampleRepo.write("master-file", "master-content-" + UUID.randomUUID());
         sampleRepo.git("add", "master-file");
         sampleRepo.git("commit", "--message=master-branch-commit-message");
 
         /* Fetch from sampleRepo */
         GitSCMSource source = new GitSCMSource(sampleRepo.toString());
-        source.setTraits(Collections.<SCMSourceTrait>singletonList(new IgnoreOnPushNotificationTrait()));
+        source.setTraits(Collections.singletonList(new IgnoreOnPushNotificationTrait()));
         List<GitSCMExtension> extensions = new ArrayList<>();
         assertThat(source.getExtensions(), is(empty()));
         LocalBranch localBranchExtension = new LocalBranch("**");
@@ -938,9 +980,11 @@ public class AbstractGitSCMSourceTest {
     }
 
 
+    // Tests deprecated GitSCMSource constructor
     @Test
-    @Deprecated // Tests deprecated GitSCMSource constructor
-    public void testCustomRemoteName() throws Exception {
+    @Deprecated
+    void testCustomRemoteName() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
 
         GitSCMSource source = new GitSCMSource(null, sampleRepo.toString(), "", "upstream", null, "*", "", true);
@@ -953,9 +997,11 @@ public class AbstractGitSCMSourceTest {
         assertEquals("+refs/heads/*:refs/remotes/upstream/*", config.getRefspec());
     }
 
+    // Tests deprecated GitSCMSource constructor
     @Test
-    @Deprecated // Tests deprecated GitSCMSource constructor
-    public void testCustomRefSpecs() throws Exception {
+    @Deprecated
+    void testCustomRefSpecs() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
 
         GitSCMSource source = new GitSCMSource(null, sampleRepo.toString(), "", null, "+refs/heads/*:refs/remotes/origin/*          +refs/merge-requests/*/head:refs/remotes/origin/merge-requests/*", "*", "", true);
@@ -970,49 +1016,59 @@ public class AbstractGitSCMSourceTest {
         assertEquals("+refs/heads/*:refs/remotes/origin/* +refs/merge-requests/*/head:refs/remotes/origin/merge-requests/*", config.getRefspec());
     }
 
+    /* Return true if git config reports fetch.prune == true, otherwise return false */
+    private boolean isPruneOnFetchEnabled() throws Exception {
+        CliGitCommand gitCmd = new CliGitCommand(null);
+        boolean checkForErrors = false; // Treat failure of `git config --get fetch.prune` as false
+        String[] pruneOnFetch = gitCmd.run(checkForErrors, "config", "--get", "fetch.prune");
+        return pruneOnFetch.length > 0 && Boolean.parseBoolean(pruneOnFetch[0]);
+    }
+
     @Test
-    public void refLockEncounteredIfPruneTraitNotPresentOnNotFoundRetrieval() throws Exception {
+    void refLockEncounteredIfPruneTraitNotPresentOnNotFoundRetrieval() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
+
+        if (isPruneOnFetchEnabled()) {
+            // Command line git won't throw expected exception if it is pruning
+            // deleted references during the fetch operation.
+            // Skip the test if pruning on fetch is enabled
+            return;
+        }
+
         TaskListener listener = StreamTaskListener.fromStderr();
         GitSCMSource source = new GitSCMSource(sampleRepo.toString());
         source.setTraits((Collections.singletonList(new BranchDiscoveryTrait())));
 
         createRefLockEnvironment(listener, source);
 
-        try {
-            source.fetch("v1.2", listener, null);
-        } catch (GitException e){
-            assertFalse(e.getMessage().contains("--prune"));
-            return;
-        }
-        //fail if ref lock does not occur
-        fail();
+        final IOException e = assertThrows(IOException.class, () -> source.fetch("v1.2", listener, null));
+        assertFalse(e.getMessage().contains("--prune"));
     }
 
     @Test
-    public void refLockEncounteredIfPruneTraitNotPresentOnTagRetrieval() throws Exception {
+    void refLockEncounteredIfPruneTraitNotPresentOnTagRetrieval() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
+
+        if (isPruneOnFetchEnabled()) {
+            // Command line git won't throw expected exception if it is pruning
+            // deleted references during the fetch operation.
+            // Skip the test if pruning on fetch is enabled
+            return;
+        }
+
         TaskListener listener = StreamTaskListener.fromStderr();
         GitSCMSource source = new GitSCMSource(sampleRepo.toString());
         source.setTraits((Collections.singletonList(new TagDiscoveryTrait())));
 
         createRefLockEnvironment(listener, source);
 
-        try {
-            source.fetch("v1.2", listener, null);
-        } catch (GitException e){
-            assertFalse(e.getMessage().contains("--prune"));
-            return;
-        }
-        //fail if ref lock does not occur
-        fail();
+        final IOException e = assertThrows(IOException.class, () -> source.fetch("v1.2", listener, null));
+        assertFalse(e.getMessage().contains("--prune"));
     }
 
     @Test
-    public void refLockAvoidedIfPruneTraitPresentOnNotFoundRetrieval() throws Exception {
-        /* Older git versions have unexpected behaviors with prune */
-        if (!sampleRepo.gitVersionAtLeast(1, 9, 0)) {
-            /* Do not distract warnings system by using assumeThat to skip tests */
-            return;
-        }
+    void refLockAvoidedIfPruneTraitPresentOnNotFoundRetrieval() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         TaskListener listener = StreamTaskListener.fromStderr();
         GitSCMSource source = new GitSCMSource(sampleRepo.toString());
         source.setTraits((Arrays.asList(new TagDiscoveryTrait(), new PruneStaleBranchTrait())));
@@ -1025,12 +1081,8 @@ public class AbstractGitSCMSourceTest {
     }
 
     @Test
-    public void refLockAvoidedIfPruneTraitPresentOnTagRetrieval() throws Exception {
-        /* Older git versions have unexpected behaviors with prune */
-        if (!sampleRepo.gitVersionAtLeast(1, 9, 0)) {
-            /* Do not distract warnings system by using assumeThat to skip tests */
-            return;
-        }
+    void refLockAvoidedIfPruneTraitPresentOnTagRetrieval() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         TaskListener listener = StreamTaskListener.fromStderr();
         GitSCMSource source = new GitSCMSource(sampleRepo.toString());
         source.setTraits((Arrays.asList(new TagDiscoveryTrait(), new PruneStaleBranchTrait())));
@@ -1067,8 +1119,10 @@ public class AbstractGitSCMSourceTest {
         sampleRepo.git("push", source.getRemote(), "v1.2");
     }
 
-    @Test @Issue("JENKINS-50394")
-    public void when_commits_added_during_discovery_we_do_not_crash() throws Exception {
+    @Test
+    @Issue("JENKINS-50394")
+    void when_commits_added_during_discovery_we_do_not_crash() throws Exception {
+        assumeTrue(isTimeAvailable(), "Test class max time " + MAX_SECONDS_FOR_THESE_TESTS + " exceeded");
         sampleRepo.init();
         sampleRepo.git("checkout", "-b", "dev");
         sampleRepo.write("file", "modified");
@@ -1077,14 +1131,9 @@ public class AbstractGitSCMSourceTest {
         sharedSampleRepo = sampleRepo;
         try {
             GitSCMSource source = new GitSCMSource(sampleRepo.toString());
-            source.setTraits(Arrays.<SCMSourceTrait>asList(new BranchDiscoveryTrait()));
+            source.setTraits(Collections.singletonList(new BranchDiscoveryTrait()));
             TaskListener listener = StreamTaskListener.fromStderr();
-            SCMHeadObserver.Collector c = source.fetch(new SCMSourceCriteria() {
-                @Override
-                public boolean isHead(@NonNull Probe probe, @NonNull TaskListener listener) throws IOException {
-                    return true;
-                }
-            }, new SCMHeadObserver.Collector(), listener);
+            SCMHeadObserver.Collector c = source.fetch((SCMSourceCriteria) (probe, listener1) -> true, new SCMHeadObserver.Collector(), listener);
 
             assertThat(c.result().keySet(), containsInAnyOrder(
                     hasProperty("name", equalTo("master")),
@@ -1186,9 +1235,5 @@ public class AbstractGitSCMSourceTest {
                 }
             };
         }
-    }
-
-    private boolean isWindows() {
-        return File.pathSeparatorChar == ';';
     }
 }

@@ -5,37 +5,49 @@ import hudson.plugins.git.BranchSpec;
 import hudson.plugins.git.GitSCM;
 import hudson.plugins.git.TestGitRepo;
 import hudson.util.StreamTaskListener;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Rule;
-import org.junit.rules.TemporaryFolder;
-import org.jvnet.hudson.test.BuildWatcher;
+import org.eclipse.jgit.util.SystemReader;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.io.TempDir;
 import org.jvnet.hudson.test.CaptureEnvironmentBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.BuildWatcherExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
+import java.io.File;
 import java.util.Collections;
 import java.util.List;
 
 /**
  * @author Kanstantsin Shautsou
  */
+@WithJenkins
 public abstract class GitSCMExtensionTest {
 
 	protected TaskListener listener;
 
-	@ClassRule
-	public static BuildWatcher buildWatcher = new BuildWatcher();
+	@RegisterExtension
+	protected static final BuildWatcherExtension BUILD_WATCHER = new BuildWatcherExtension();
 
-	@Rule
-	public JenkinsRule j = new JenkinsRule();
+	protected JenkinsRule r;
 
-	@Rule
-	public TemporaryFolder tmp = new TemporaryFolder();
+	@TempDir
+    protected File tmp;
 
-	@Before
-	public void setUp() throws Exception {
+    @BeforeEach
+    protected void beforeEach(JenkinsRule rule) throws Exception {
+        r = rule;
+		SystemReader.getInstance().getUserConfig().clear();
 		listener = StreamTaskListener.fromStderr();
 		before();
+
+		GitSCM.ALLOW_LOCAL_CHECKOUT = true;
+	}
+
+	@AfterEach
+	protected void afterEach() {
+		GitSCM.ALLOW_LOCAL_CHECKOUT = false;
 	}
 
 	protected abstract void before() throws Exception;
@@ -50,7 +62,7 @@ public abstract class GitSCMExtensionTest {
 	protected FreeStyleBuild build(final FreeStyleProject project, final Result expectedResult) throws Exception {
 		final FreeStyleBuild build = project.scheduleBuild2(0, new Cause.UserIdCause()).get();
 		if(expectedResult != null) {
-			j.assertBuildStatus(expectedResult, build);
+			r.assertBuildStatus(expectedResult, build);
 		}
 		return build;
 	}
@@ -65,13 +77,13 @@ public abstract class GitSCMExtensionTest {
 	 */
 	protected FreeStyleProject setupBasicProject(TestGitRepo repo) throws Exception {
 		GitSCMExtension extension = getExtension();
-		FreeStyleProject project = j.createFreeStyleProject("p");
+		FreeStyleProject project = r.createFreeStyleProject("p");
 		List<BranchSpec> branches = Collections.singletonList(new BranchSpec("master"));
 		GitSCM scm = new GitSCM(
 				repo.remoteConfigs(),
 				branches,
 				null, null,
-				Collections.<GitSCMExtension>emptyList());
+				Collections.emptyList());
 		scm.getExtensions().add(extension);
 		project.setScm(scm);
 		project.getBuildersList().add(new CaptureEnvironmentBuilder());

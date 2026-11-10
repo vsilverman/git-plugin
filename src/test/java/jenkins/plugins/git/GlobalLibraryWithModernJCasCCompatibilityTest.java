@@ -5,9 +5,8 @@ import hudson.plugins.git.extensions.impl.CheckoutOption;
 import hudson.plugins.git.extensions.impl.CloneOption;
 import hudson.plugins.git.extensions.impl.SubmoduleOption;
 import hudson.plugins.git.extensions.impl.UserIdentity;
-import io.jenkins.plugins.casc.misc.RoundTripAbstractTest;
+import io.jenkins.plugins.casc.misc.junit.jupiter.AbstractRoundTripTest;
 import jenkins.plugins.git.traits.AuthorInChangelogTrait;
-import jenkins.plugins.git.traits.BranchDiscoveryTrait;
 import jenkins.plugins.git.traits.CheckoutOptionTrait;
 import jenkins.plugins.git.traits.CleanAfterCheckoutTrait;
 import jenkins.plugins.git.traits.CleanBeforeCheckoutTrait;
@@ -21,17 +20,19 @@ import jenkins.plugins.git.traits.PruneStaleBranchTrait;
 import jenkins.plugins.git.traits.RefSpecsSCMSourceTrait;
 import jenkins.plugins.git.traits.RemoteNameSCMSourceTrait;
 import jenkins.plugins.git.traits.SubmoduleOptionTrait;
-import jenkins.plugins.git.traits.TagDiscoveryTrait;
 import jenkins.plugins.git.traits.UserIdentityTrait;
 import jenkins.plugins.git.traits.WipeWorkspaceTrait;
 import jenkins.scm.api.SCMSource;
 import jenkins.scm.impl.trait.RegexSCMHeadFilterTrait;
 import jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait;
+import org.hamcrest.Description;
+import org.hamcrest.DiagnosingMatcher;
 import org.jenkinsci.plugins.workflow.libs.GlobalLibraries;
 import org.jenkinsci.plugins.workflow.libs.LibraryConfiguration;
 import org.jenkinsci.plugins.workflow.libs.LibraryRetriever;
 import org.jenkinsci.plugins.workflow.libs.SCMSourceRetriever;
-import org.jvnet.hudson.test.RestartableJenkinsRule;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.beans.HasPropertyWithValue.hasProperty;
@@ -39,13 +40,15 @@ import static org.hamcrest.collection.IsCollectionWithSize.hasSize;
 import static org.hamcrest.core.AllOf.allOf;
 import static org.hamcrest.core.IsEqual.equalTo;
 import static org.hamcrest.core.IsInstanceOf.instanceOf;
-import static org.junit.Assert.assertEquals;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-public class GlobalLibraryWithModernJCasCCompatibilityTest extends RoundTripAbstractTest {
+@WithJenkins
+class GlobalLibraryWithModernJCasCCompatibilityTest extends AbstractRoundTripTest {
+
     @Override
-    protected void assertConfiguredAsExpected(RestartableJenkinsRule restartableJenkinsRule, String s) {
+    protected void assertConfiguredAsExpected(JenkinsRule rule, String s) {
         final LibraryConfiguration library = GlobalLibraries.get().getLibraries().get(0);
         assertEquals("My Git Lib", library.getName());
         assertEquals("1.2.3", library.getDefaultVersion());
@@ -64,11 +67,13 @@ public class GlobalLibraryWithModernJCasCCompatibilityTest extends RoundTripAbst
         assertThat(gitSCMSource.getTraits(), containsInAnyOrder(
                 //Discover branches
                 allOf(
-                        instanceOf(BranchDiscoveryTrait.class)
+                        new SimpleNameMatcher("BranchDiscoveryTrait")
+                        // TODO after JENKINS-67309 instanceOf(BranchDiscoveryTrait.class)
                 ),
                 // Discover tags
                 allOf(
-                        instanceOf(TagDiscoveryTrait.class)
+                        new SimpleNameMatcher("TagDiscoveryTrait")
+                        // TODO after JENKINS-67309 instanceOf(TagDiscoveryTrait.class)
                 ),
                 // Check out to matching local branch
                 allOf(
@@ -187,5 +192,33 @@ public class GlobalLibraryWithModernJCasCCompatibilityTest extends RoundTripAbst
     @Override
     protected String configResource() {
         return "global-with-modern-casc.yaml";
+    }
+
+    private static final class SimpleNameMatcher extends DiagnosingMatcher<Object> {
+        private final String expectedSimpleName;
+
+        public SimpleNameMatcher(String expectedSimpleName) {
+            this.expectedSimpleName = expectedSimpleName;
+        }
+
+        @Override
+        protected boolean matches(Object item, Description mismatch) {
+            if (item == null) {
+                mismatch.appendText("null");
+                return false;
+            }
+
+            if (!item.getClass().getSimpleName().equals(expectedSimpleName)) {
+                mismatch.appendValue(item).appendText(" is a " + item.getClass().getName());
+                return false;
+            }
+
+            return true;
+        }
+
+        @Override
+        public void describeTo(Description description) {
+            description.appendText("an instance of ").appendText(expectedSimpleName);
+        }
     }
 }

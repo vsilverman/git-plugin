@@ -30,8 +30,6 @@ import hudson.model.Run;
 import hudson.model.TaskListener;
 import static org.eclipse.jgit.lib.Constants.HEAD;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-
 /**
  * Speculatively merge the selected commit with another branch before the build to answer the "what happens
  * if I were to integrate this feature branch back to the master?" question.
@@ -45,20 +43,18 @@ public class PreBuildMerge extends GitSCMExtension {
     private final UserMergeOptions options;
 
     @DataBoundConstructor
-    @SuppressFBWarnings(value="EI_EXPOSE_REP2", justification="Low risk")
     public PreBuildMerge(UserMergeOptions options) {
         if (options==null)  throw new IllegalStateException();
         this.options = options;
     }
 
     @Whitelisted
-    @SuppressFBWarnings(value="EI_EXPOSE_REP", justification="Low risk")
     public UserMergeOptions getOptions() {
         return options;
     }
 
     @Override
-    public Revision decorateRevisionToBuild(GitSCM scm, Run<?, ?> build, GitClient git, TaskListener listener, Revision marked, Revision rev) throws IOException, InterruptedException {
+    public Revision decorateRevisionToBuild(GitSCM scm, Run<?, ?> build, GitClient git, TaskListener listener, Revision marked, Revision rev) throws GitException, IOException, InterruptedException {
         String remoteBranchRef = GitSCM.getParameterString(options.getRef(), build.getEnvironment(listener));
 
         // if the branch we are merging is already at the commit being built, the entire merge becomes no-op
@@ -136,6 +132,16 @@ public class PreBuildMerge extends GitSCMExtension {
         cmd.setGitPluginFastForwardMode(options.getFastForwardMode());
     }
 
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void beforeCheckout(GitSCM scm, Run<?, ?> build, GitClient git, TaskListener listener) throws IOException, InterruptedException, GitException {
+        if (build != null && build.getClass().getName().startsWith("org.jenkinsci.plugins.workflow.job.")) {
+            listener.getLogger().println("DEPRECATED: The 'Merge before build' extension is deprecated for Pipeline jobs. " + "Pipeline users should perform merges explicitly using shell steps (e.g. sh 'git merge').");
+        }
+    }
+
     @Override
     public GitClientType getRequiredClient() {
         return GitClientType.GITCLI;
@@ -172,11 +178,13 @@ public class PreBuildMerge extends GitSCMExtension {
     @Override
     public String toString() {
         return "PreBuildMerge{" +
-                "options=" + options.toString() +
+                "options=" + options +
                 '}';
     }
 
     @Extension
+    // No @Symbol because merge before build requires credentials with git large file support.
+    // Users that need merge before build in Pipeline can script the merge themselves with sh commands.
     public static class DescriptorImpl extends GitSCMExtensionDescriptor {
         /**
          * {@inheritDoc}

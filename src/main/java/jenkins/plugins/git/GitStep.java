@@ -25,13 +25,14 @@
 package jenkins.plugins.git;
 
 import com.google.inject.Inject;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.Extension;
 import hudson.Util;
 import hudson.model.Item;
 import hudson.plugins.git.BranchSpec;
+import hudson.plugins.git.GitException;
 import hudson.plugins.git.GitSCM;
 import hudson.plugins.git.UserRemoteConfig;
-import hudson.plugins.git.extensions.GitSCMExtension;
 import hudson.plugins.git.extensions.impl.LocalBranch;
 import hudson.scm.SCM;
 import hudson.util.FormValidation;
@@ -82,8 +83,15 @@ public final class GitStep extends SCMStep {
     }
 
     @Override
+    @SuppressFBWarnings(value="IAOM_DO_NOT_INCREASE_METHOD_ACCESSIBILITY",
+                        justification="Part of the public API")
     public SCM createSCM() {
-        return new GitSCM(GitSCM.createRepoList(url, credentialsId), Collections.singletonList(new BranchSpec("*/" + branch)), null, null, Collections.<GitSCMExtension>singletonList(new LocalBranch(branch)));
+        try {
+            return new GitSCM(GitSCM.createRepoList(url, credentialsId), Collections.singletonList(new BranchSpec("*/" + branch)), null, null, Collections.singletonList(new LocalBranch(branch)));
+        } catch (GitException x) {
+            // TODO interface defines no checked exception
+            throw new IllegalStateException(x);
+        }
     }
 
     @Extension

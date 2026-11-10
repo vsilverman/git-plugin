@@ -31,6 +31,7 @@ import hudson.plugins.git.BranchSpec;
 import hudson.plugins.git.Revision;
 import hudson.util.StreamTaskListener;
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -38,6 +39,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import jenkins.plugins.git.GitSampleRepoRule;
+import jenkins.plugins.git.junit.jupiter.WithGitSampleRepo;
 import org.eclipse.jgit.lib.ObjectId;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.is;
@@ -45,19 +47,19 @@ import static org.hamcrest.Matchers.nullValue;
 import org.jenkinsci.plugins.gitclient.Git;
 import org.jenkinsci.plugins.gitclient.GitClient;
 import static org.hamcrest.MatcherAssert.assertThat;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
 
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+@WithGitSampleRepo
 public class GitUtilsTest {
 
-    @ClassRule
-    public static GitSampleRepoRule originRepo = new GitSampleRepoRule();
+    private static GitSampleRepoRule originRepo;
 
-    @ClassRule
-    public static TemporaryFolder repoParentFolder = new TemporaryFolder();
+    @TempDir
+    private static File repoParentFolder;
 
     private static final String[] HEAD_BRANCH_NAMES = {
         "master",
@@ -100,12 +102,15 @@ public class GitUtilsTest {
 
     private static final Random RANDOM = new Random();
 
-    @BeforeClass
-    public static void createSampleOriginRepo() throws Exception {
+    @BeforeAll
+    static void beforeAll(GitSampleRepoRule repo) throws Exception {
+        originRepo = repo;
+
         String fileName = "README";
         originRepo.init();
         originRepo.git("config", "user.name", "Author User Name");
         originRepo.git("config", "user.email", "author.user.name@mail.example.com");
+
         originRepo.git("tag", PRIOR_TAG_NAME_1);
         originRepo.git("tag", "-a", PRIOR_TAG_NAME_2, "-m", "Annotated tag " + PRIOR_TAG_NAME_2);
         priorHeadId = ObjectId.fromString(originRepo.head());
@@ -153,62 +158,62 @@ public class GitUtilsTest {
         originRepo.git("checkout", "master"); // Master branch as current branch in origin repo
         headRevision = new Revision(headId, branchList);
 
-        File gitDir = repoParentFolder.newFolder("test-repo");
+        File gitDir = newFolder(repoParentFolder, "test-repo");
         gitClient = Git.with(NULL_LISTENER, ENV).in(gitDir).using("git").getClient();
         gitClient.init();
         gitClient.clone_().url(originRepo.fileUrl()).repositoryName("origin").execute();
         gitClient.checkout("origin/master", "master");
     }
 
-    @Before
-    public void createGitUtils() throws Exception {
+    @BeforeEach
+    void beforeEach() throws Exception {
         gitUtils = new GitUtils(NULL_LISTENER, gitClient);
     }
 
     @Test
-    public void testSortBranchesForRevision_Revision_List() {
+    void testSortBranchesForRevision_Revision_List() {
         Revision result = gitUtils.sortBranchesForRevision(headRevision, branchSpecList);
         assertThat(result, is(headRevision));
     }
 
     @Test
-    public void testSortBranchesForRevision_Revision_List_Prior() {
+    void testSortBranchesForRevision_Revision_List_Prior() {
         Revision result = gitUtils.sortBranchesForRevision(priorRevision, priorBranchSpecList);
         assertThat(result, is(priorRevision));
     }
 
     @Test
-    public void testSortBranchesForRevision_Revision_List_Mix_1() {
+    void testSortBranchesForRevision_Revision_List_Mix_1() {
         Revision result = gitUtils.sortBranchesForRevision(headRevision, priorBranchSpecList);
         assertThat(result, is(headRevision));
     }
 
     @Test
-    public void testSortBranchesForRevision_Revision_List_Mix_2() {
+    void testSortBranchesForRevision_Revision_List_Mix_2() {
         Revision result = gitUtils.sortBranchesForRevision(priorRevision, branchSpecList);
         assertThat(result, is(priorRevision));
     }
 
     @Test
-    public void testSortBranchesForRevision_Revision_List_Prior_3_args() {
+    void testSortBranchesForRevision_Revision_List_Prior_3_args() {
         Revision result = gitUtils.sortBranchesForRevision(headRevision, branchSpecList, ENV);
         assertThat(result, is(headRevision));
     }
 
     @Test
-    public void testSortBranchesForRevision_3args() {
+    void testSortBranchesForRevision_3args() {
         Revision result = gitUtils.sortBranchesForRevision(headRevision, branchSpecList, ENV);
         assertThat(result, is(headRevision));
     }
 
     @Test
-    public void testSortBranchesForRevision_3args_Prior() {
+    void testSortBranchesForRevision_3args_Prior() {
         Revision result = gitUtils.sortBranchesForRevision(priorRevision, branchSpecList, ENV);
         assertThat(result, is(priorRevision));
     }
 
     @Test
-    public void testGetRevisionContainingBranch() throws Exception {
+    void testGetRevisionContainingBranch() throws Exception {
         for (String branchName : HEAD_BRANCH_NAMES) {
             Revision revision = gitUtils.getRevisionContainingBranch("origin/" + branchName);
             assertThat(revision, is(headRevision));
@@ -216,72 +221,72 @@ public class GitUtilsTest {
     }
 
     @Test
-    public void testGetRevisionContainingBranch_OlderName() throws Exception {
+    void testGetRevisionContainingBranch_OlderName() throws Exception {
         Revision revision = gitUtils.getRevisionContainingBranch("origin/" + OLDER_BRANCH_NAME);
         assertThat(revision, is(priorRevision));
     }
 
     /* Tags are searched in getRevisionContainingBranch beginning with 3.2.0 */
     @Test
-    public void testGetRevisionContainingBranch_UseTagNameHead0() throws Exception {
+    void testGetRevisionContainingBranch_UseTagNameHead0() throws Exception {
         Revision revision = gitUtils.getRevisionContainingBranch("refs/tags/" + HEAD_TAG_NAME_0);
         assertThat(revision, is(headTag0Revision));
     }
 
     /* Tags are searched in getRevisionContainingBranch beginning with 3.2.0 */
     @Test
-    public void testGetRevisionContainingBranch_UseTagNameHead1() throws Exception {
+    void testGetRevisionContainingBranch_UseTagNameHead1() throws Exception {
         Revision revision = gitUtils.getRevisionContainingBranch("refs/tags/" + HEAD_TAG_NAME_1);
         assertThat(revision, is(headRevision));
     }
 
     /* Tags are searched in getRevisionContainingBranch beginning with 3.2.0 */
     @Test
-    public void testGetRevisionContainingBranch_UseTagNameHead2() throws Exception {
+    void testGetRevisionContainingBranch_UseTagNameHead2() throws Exception {
         Revision revision = gitUtils.getRevisionContainingBranch("refs/tags/" + HEAD_TAG_NAME_2);
         assertThat(revision, is(headRevision));
     }
 
     /* Tags are searched in getRevisionContainingBranch beginning with 3.2.0 */
     @Test
-    public void testGetRevisionContainingBranch_UseTagNamePrior1() throws Exception {
+    void testGetRevisionContainingBranch_UseTagNamePrior1() throws Exception {
         Revision revision = gitUtils.getRevisionContainingBranch("refs/tags/" + PRIOR_TAG_NAME_1);
         assertThat(revision, is(priorRevision));
     }
 
     /* Tags are searched in getRevisionContainingBranch beginning with 3.2.0 */
     @Test
-    public void testGetRevisionContainingBranch_UseTagNamePrior2() throws Exception {
+    void testGetRevisionContainingBranch_UseTagNamePrior2() throws Exception {
         Revision revision = gitUtils.getRevisionContainingBranch("refs/tags/" + PRIOR_TAG_NAME_2);
         assertThat(revision, is(priorRevision));
     }
 
     @Test
-    public void testGetRevisionContainingBranch_InvalidBranchName() throws Exception {
+    void testGetRevisionContainingBranch_InvalidBranchName() throws Exception {
         Revision revision = gitUtils.getRevisionContainingBranch("origin/not-a-valid-branch-name");
         assertThat(revision, is(nullValue(Revision.class)));
     }
 
     @Test
-    public void testGetRevisionContainingBranch_InvalidTagName() throws Exception {
+    void testGetRevisionContainingBranch_InvalidTagName() throws Exception {
         Revision revision = gitUtils.getRevisionContainingBranch("ref/tags/not-a-valid-tag-name");
         assertThat(revision, is(nullValue(Revision.class)));
     }
 
     @Test
-    public void testGetRevisionForSHA1() throws Exception {
+    void testGetRevisionForSHA1() throws Exception {
         Revision revision = gitUtils.getRevisionForSHA1(headId);
         assertThat(revision, is(headRevision));
     }
 
     @Test
-    public void testGetRevisionForSHA1PriorRevision() throws Exception {
+    void testGetRevisionForSHA1PriorRevision() throws Exception {
         Revision revision = gitUtils.getRevisionForSHA1(priorHeadId);
         assertThat(revision, is(priorRevision));
     }
 
     @Test
-    public void testGetRevisionForSHA1UnknownRevision() throws Exception {
+    void testGetRevisionForSHA1UnknownRevision() throws Exception {
         ObjectId unknown = ObjectId.fromString("a422d10c6dc4262effb12f9e7a64911111000000");
         Revision unknownRevision = new Revision(unknown);
         Revision revision = gitUtils.getRevisionForSHA1(unknown);
@@ -289,7 +294,7 @@ public class GitUtilsTest {
     }
 
     @Test
-    public void testFilterTipBranches() throws Exception {
+    void testFilterTipBranches() throws Exception {
         Collection<Revision> multiRevisionList = new ArrayList<>();
         multiRevisionList.add(priorRevision);
         multiRevisionList.add(headRevision);
@@ -300,7 +305,7 @@ public class GitUtilsTest {
     }
 
     @Test
-    public void testFilterTipBranchesNoRemovals() throws Exception {
+    void testFilterTipBranchesNoRemovals() throws Exception {
         Collection<Revision> headRevisionList = new ArrayList<>();
         headRevisionList.add(headRevision);
         List<Revision> result = gitUtils.filterTipBranches(headRevisionList);
@@ -308,7 +313,7 @@ public class GitUtilsTest {
     }
 
     @Test
-    public void testFilterTipBranchesNoRemovalsNonTip() throws Exception {
+    void testFilterTipBranchesNoRemovalsNonTip() throws Exception {
         Collection<Revision> priorRevisionList = new ArrayList<>();
         priorRevisionList.add(priorRevision);
         List<Revision> result = gitUtils.filterTipBranches(priorRevisionList);
@@ -316,7 +321,7 @@ public class GitUtilsTest {
     }
 
     @Test
-    public void testFixupNames() {
+    void testFixupNames() {
         String[] names = {"origin", "origin2", null, "", null};
         String[] urls = {
             "git://example.com/jenkinsci/git-plugin.git",
@@ -353,11 +358,30 @@ public class GitUtilsTest {
     }
 
     @Test
-    public void testGetAllBranchRevisions() throws Exception {
+    void testGetAllBranchRevisions() throws Exception {
         Collection<Revision> allRevisions = gitUtils.getAllBranchRevisions();
         assertThat(allRevisions, hasItem(headRevision));
         Set<String> expectedNames = getExpectedNames();
         Set<String> actualNames = getActualNames(allRevisions);
         assertThat(actualNames, is(expectedNames));
+    }
+
+    /**
+     *
+     * @return EnvVars including GIT_CONFIG_NOSYSTEM set to
+     */
+    public static EnvVars getConfigNoSystemEnvsVars() {
+        EnvVars envVars = new EnvVars();
+        envVars.put("GIT_CONFIG_NOSYSTEM", "1");
+        return envVars;
+    }
+
+    private static File newFolder(File root, String... subDirs) throws IOException {
+        String subFolder = String.join("/", subDirs);
+        File result = new File(root, subFolder);
+        if (!result.mkdirs()) {
+            throw new IOException("Couldn't create folders " + root);
+        }
+        return result;
     }
 }

@@ -6,11 +6,13 @@ import hudson.plugins.git.GitChangeSet;
 import hudson.plugins.git.GitChangeSet.Path;
 import hudson.scm.RepositoryBrowser;
 import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
 import java.io.IOException;
+import java.io.Serial;
 import java.net.URL;
 
 /**
@@ -18,6 +20,7 @@ import java.net.URL;
  */
 public class Phabricator extends GitRepositoryBrowser {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     private final String repo;
@@ -42,7 +45,7 @@ public class Phabricator extends GitRepositoryBrowser {
      */
     @Override
     public URL getChangeSetLink(GitChangeSet changeSet) throws IOException {
-        return new URL(getUrl(), String.format("/r%s%s", this.getRepo(), changeSet.getId()));
+        return new URL(getUrl(), "/r%s%s".formatted(this.getRepo(), changeSet.getId()));
     }
 
     /**
@@ -59,7 +62,7 @@ public class Phabricator extends GitRepositoryBrowser {
     public URL getDiffLink(Path path) throws IOException {
         final GitChangeSet changeSet = path.getChangeSet();
         final String sha = changeSet.getId();
-        final String spec = String.format("/diffusion/%s/change/master/%s;%s", this.getRepo(), path.getPath(), sha);
+        final String spec = "/diffusion/%s/change/master/%s;%s".formatted(this.getRepo(), path.getPath(), sha);
         return new URL(getUrl(), spec);
     }
 
@@ -75,11 +78,12 @@ public class Phabricator extends GitRepositoryBrowser {
     public URL getFileLink(Path path) throws IOException {
         final GitChangeSet changeSet = path.getChangeSet();
         final String sha = changeSet.getId();
-        final String spec = String.format("/diffusion/%s/history/master/%s;%s", this.getRepo(), path.getPath(), sha);
+        final String spec = "/diffusion/%s/history/master/%s;%s".formatted(this.getRepo(), path.getPath(), sha);
         return encodeURL(new URL(getUrl(), spec));
     }
 
     @Extension
+    @Symbol("phabricator")
     public static class PhabricatorDescriptor extends Descriptor<RepositoryBrowser<?>> {
         @NonNull
         public String getDisplayName() {
@@ -87,8 +91,7 @@ public class Phabricator extends GitRepositoryBrowser {
         }
 
         @Override
-        public Phabricator newInstance(StaplerRequest req, @NonNull JSONObject jsonObject) throws FormException {
-            assert req != null; //see inherited javadoc
+        public Phabricator newInstance(@NonNull StaplerRequest2 req, @NonNull JSONObject jsonObject) throws FormException {
             return req.bindJSON(Phabricator.class, jsonObject);
         }
     }

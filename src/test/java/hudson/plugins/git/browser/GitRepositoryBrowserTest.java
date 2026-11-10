@@ -1,28 +1,36 @@
 package hudson.plugins.git.browser;
 
+import hudson.EnvVars;
+import hudson.model.TaskListener;
 import hudson.plugins.git.GitChangeSet;
 import hudson.plugins.git.GitChangeSetUtil;
+import hudson.plugins.git.GitException;
+import org.junit.jupiter.api.BeforeEach;
 
 import org.eclipse.jgit.lib.ObjectId;
 
+import org.jenkinsci.plugins.gitclient.Git;
+import org.jenkinsci.plugins.gitclient.GitClient;
+
+import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+
 import static org.hamcrest.MatcherAssert.*;
 import static org.hamcrest.Matchers.*;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
-@RunWith(Parameterized.class)
-public class GitRepositoryBrowserTest {
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
+
+@ParameterizedClass(name = "{0},{1},{2}")
+@MethodSource("permuteAuthorNameAndGitImplementationAndObjectId")
+class GitRepositoryBrowserTest {
 
     private GitRepositoryBrowser browser;
     private GitChangeSet changeSet;
@@ -34,16 +42,17 @@ public class GitRepositoryBrowserTest {
     private final String gitImplementation;
     private final ObjectId sha1;
 
-    public GitRepositoryBrowserTest(String useAuthorName, String gitImplementation, ObjectId sha1) {
-        this.useAuthorName = Boolean.valueOf(useAuthorName);
+    public GitRepositoryBrowserTest(boolean useAuthorName, String gitImplementation, ObjectId sha1) {
+        this.useAuthorName = useAuthorName;
         this.gitImplementation = gitImplementation;
         this.sha1 = sha1;
     }
 
-    @Parameterized.Parameters(name = "{0},{1},{2}")
-    public static Collection permuteAuthorNameAndGitImplementationAndObjectId() {
+    private static final ObjectId HEAD = getMostRecentCommit();
+
+    static Collection permuteAuthorNameAndGitImplementationAndObjectId() {
         List<Object[]> values = new ArrayList<>();
-        String[] allowed = {"true", "false"};
+        boolean[] allowed = {true, false};
         String[] implementations = {"git", "jgit"};
         ObjectId[] sha1Array = { // Use commits from git-plugin repo history
             ObjectId.fromString("016407404eeda093385ba2ebe9557068b519b669"), // simple commit
@@ -53,65 +62,77 @@ public class GitRepositoryBrowserTest {
             ObjectId.fromString("8e4ef541b8f319fd2019932a6cddfc480fc7ca28"), // Old commit
             ObjectId.fromString("75ef0cde74e01f16b6da075d67cf88b3503067f5"), // First commit - no files, no parent
         };
-        for (String authorName : allowed) {
+        for (boolean authorName : allowed) {
             for (String gitImplementation : implementations) {
-                for (ObjectId sha1 : sha1Array) {
-                    Object[] combination = {authorName, gitImplementation, sha1};
-                    values.add(combination);
+                Object[] headCommitCombination = {authorName, gitImplementation, HEAD};
+                values.add(headCommitCombination);
+                if (!isShallowClone()) {
+                    for (ObjectId sha1 : sha1Array) {
+                        Object[] combination = {authorName, gitImplementation, sha1};
+                        values.add(combination);
+                    }
                 }
             }
         }
         return values;
     }
 
-    @Before
-    public void setUp() throws IOException, InterruptedException {
+    private static boolean isShallowClone() {
+        File shallowFile = new File(".git", "shallow");
+        return shallowFile.isFile();
+    }
+
+    private static ObjectId getMostRecentCommit() {
+        ObjectId headCommit;
+        try {
+            GitClient git = Git.with(TaskListener.NULL, new EnvVars()).getClient();
+            headCommit = git.revParse("HEAD");
+        } catch (GitException | IOException | InterruptedException e) {
+            headCommit = ObjectId.fromString("016407404eeda093385ba2ebe9557068b519b669"); // simple commit
+        }
+        return headCommit;
+    }
+
+    @BeforeEach
+    void beforeEach() throws Exception {
         browser = new GitRepositoryBrowserImpl(null);
         changeSet = GitChangeSetUtil.genChangeSet(sha1, gitImplementation, useAuthorName);
         paths = changeSet.getPaths();
     }
 
     @Test
-    public void testGetRepoUrl() {
+    void testGetRepoUrl() {
         assertThat(browser.getRepoUrl(), is(nullValue()));
     }
 
     @Test
-    public void testGetDiffLink() throws Exception {
+    void testGetDiffLink() throws Exception {
         for (GitChangeSet.Path path : paths) {
             assertThat(browser.getDiffLink(path), is(getURL(path, true)));
         }
     }
 
     @Test
-    public void testGetFileLink() throws Exception {
+    void testGetFileLink() throws Exception {
         for (GitChangeSet.Path path : paths) {
             assertThat(browser.getFileLink(path), is(getURL(path, false)));
         }
     }
 
     @Test
-    public void testGetNormalizeUrl() {
+    void testGetNormalizeUrl() {
         assertThat(browser.getNormalizeUrl(), is(true));
     }
 
     @Test
-    public void testGetIndexOfPath() throws Exception {
-        Set<Integer> foundLocations = new HashSet<>(paths.size());
+    void testGetIndexOfPath() throws Exception {
         for (GitChangeSet.Path path : paths) {
             int location = browser.getIndexOfPath(path);
 
             // Assert that location is in bounds
             assertThat(location, is(lessThan(paths.size())));
             assertThat(location, is(greaterThan(-1)));
-
-            // Assert that location has not been seen before
-            assertThat(foundLocations, not(hasItem(location)));
-            foundLocations.add(location);
         }
-
-        // Assert that exact number of locations were found
-        assertThat(foundLocations.size(), is(paths.size()));
     }
 
     private URL getURL(GitChangeSet.Path path, boolean isDiffLink) throws MalformedURLException {

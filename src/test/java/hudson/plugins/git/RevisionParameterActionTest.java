@@ -28,20 +28,21 @@ import hudson.model.FreeStyleProject;
 import hudson.model.FreeStyleBuild;
 import hudson.model.Result;
 import hudson.plugins.git.util.BuildData;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
-import static org.junit.Assert.*;
-import org.junit.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 /**
  * Tests for {@link RevisionParameterAction}
  *
  * @author Chris Johnson
  */
-public class RevisionParameterActionTest extends AbstractGitProject {
+class RevisionParameterActionTest extends AbstractGitProject {
 
     @Test
-    public void testProvidingRevision() throws Exception {
+    void testProvidingRevision() throws Exception {
 
         FreeStyleProject p1 = setupSimpleProject("master");
 
@@ -71,8 +72,7 @@ public class RevisionParameterActionTest extends AbstractGitProject {
         FreeStyleBuild b3 = build(p1, Result.SUCCESS, commitFile2);
 
         // Check revision built for b3 does not match r1 revision
-        assertFalse(b3.getAction(BuildData.class)
-                        .getLastBuiltRevision().getSha1String().equals(r1.getSha1String()));		
+        assertNotEquals(b3.getAction(BuildData.class)
+                .getLastBuiltRevision().getSha1String(), r1.getSha1String());
     }
 }
-
